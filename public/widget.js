@@ -6,7 +6,12 @@ const theme = params.get("theme") || "light";
 const timeframe = params.get("timeframe") || "ALL";
 
 const root = document.getElementById("root");
-root.innerHTML = `<div style="opacity:.7;font-family:ui-sans-serif;">Loading widget…</div>`;
+root.innerHTML = `
+  <div class="loading">
+    <div class="loading-spinner"></div>
+    <span>Loading widget…</span>
+  </div>
+`;
 
 loadEmbedScript()
   .then(() => {
@@ -19,14 +24,15 @@ loadEmbedScript()
     root.appendChild(el);
   })
   .catch((err) => {
-    root.innerHTML = `<div style="color:#b91c1c;font-family:ui-sans-serif;">
-      Failed to load widget: ${escapeHtml(err?.message || String(err))}
-    </div>`;
+    root.innerHTML = `
+      <div class="error">
+        Failed to load widget: ${escapeHtml(err?.message || String(err))}
+      </div>
+    `;
     console.error(err);
   });
 
 function loadEmbedScript() {
-  // already defined
   if (customElements.get("probable-markets")) return Promise.resolve();
 
   return new Promise((resolve, reject) => {

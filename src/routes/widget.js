@@ -28,8 +28,6 @@ router.post("/markets", async (req, res, next) => {
         const out = await fetchAndExtractArticle(articleUrl.trim());
         title = out.title || "";
         text = out.text || "";
-        console.log("EXTRACTED TITLE:", title);
-        console.log("EXTRACTED TEXT SAMPLE:", text.slice(0, 300));
         } else if (query?.trim()) {
         title = query.trim();
         text = query.trim();
