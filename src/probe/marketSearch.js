@@ -9,7 +9,7 @@ export async function findRelevantMarkets({ queryEmbedding, keywords, limit = 5 
   if (Array.isArray(queryEmbedding) && queryEmbedding.length) {
     const { data, error } = await supabase.rpc("match_markets", {
       query_embedding: queryEmbedding,
-      match_count: limit * 14
+      match_count: 120
     });
 
     if (!error && Array.isArray(data) && data.length) {

@@ -45,7 +45,8 @@ class ProbableMarkets extends HTMLElement {
       };
   
       try {
-        const res = await fetch("/v1/widget/markets", {
+        const apiBase = getApiBase();
+        const res = await fetch(`${apiBase}/v1/widget/markets`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ articleUrl, query, limit: 5 })
@@ -218,5 +219,13 @@ class ProbableMarkets extends HTMLElement {
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
+  }
+
+  function getApiBase() {
+    // If you load embed.js from your API host (recommended), this auto-works.
+    // Example: <script src="https://api.yourdomain.com/embed.js" defer></script>
+    const script = document.currentScript || [...document.scripts].find(s => (s.src || "").includes("embed.js"));
+    if (script?.src) return new URL(script.src).origin;
+    return window.location.origin; // fallback
   }
   
