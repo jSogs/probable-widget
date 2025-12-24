@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Probable Markets – Demo Article</title>
+
+    <!-- Load widget from your deployed API -->
+    <script src="https://probable-widget.onrender.com/embed.js" defer></script>
+
+    <style>
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+        margin: 0;
+        background: #0b0f14;
+        color: #e8edf2;
+      }
+      header {
+        padding: 28px 18px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.02);
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 0 18px;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 40px;
+        line-height: 1.1;
+      }
+      .meta {
+        opacity: 0.7;
+        font-size: 14px;
+      }
+      main {
+        padding: 28px 0 64px;
+      }
+      article {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 16px;
+        padding: 22px;
+      }
+      article p {
+        opacity: 0.9;
+        line-height: 1.7;
+        font-size: 16px;
+      }
+      .widget-block {
+        margin: 18px 0 26px;
+      }
+      .note {
+        opacity: 0.6;
+        font-size: 13px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <div class="wrap">
+        <h1>Are Chelsea genuine Premier League title contenders?</h1>
+        <div class="meta">
+          Demo article • Probable Markets embed (proof of concept)
+        </div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <div class="widget-block">
+        <!-- MVP-safe usage: query-based -->
+        <probable-markets
+          query="Are Chelsea genuine Premier League title contenders?"
+          timeframe="ALL"
+        ></probable-markets>
+
+        <div class="note">
+          This demo uses <code>query</code> instead of <code>article-url</code> to avoid paywalls.
+          Publishers can later pass full article text for higher accuracy.
+        </div>
+      </div>
+
+      <article>
+        <p>
+          Chelsea’s recent run of form has reignited debate about whether they can mount a serious
+          Premier League title challenge. Improved attacking cohesion and defensive structure
+          have fueled optimism among supporters.
+        </p>
+        <p>
+          Analysts caution that upcoming fixtures against traditional title rivals will provide
+          a clearer signal of whether this surge is sustainable or simply a purple patch.
+        </p>
+        <p>
+          With a young squad and evolving tactical identity, Chelsea’s season remains one of the
+          most closely watched narratives in English football.
+        </p>
+      </article>
+    </main>
+  </body>
+</html>
