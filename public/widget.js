@@ -1,15 +1,17 @@
-// public/widget.js
 const params = new URLSearchParams(location.search);
 const article = params.get("article") || "";
 const query = params.get("query") || "";
-const theme = params.get("theme") || "light";
+const theme = params.get("theme") || "dark";
 const timeframe = params.get("timeframe") || "ALL";
 
 const root = document.getElementById("root");
+
 root.innerHTML = `
-  <div class="loading">
-    <div class="loading-spinner"></div>
-    <span>Loading widget…</span>
+  <div style="
+    display:flex; align-items:center; justify-content:center;
+    padding: 28px 0; opacity: 0.8; font-size: 14px;
+  ">
+    Loading widget…
   </div>
 `;
 
@@ -25,7 +27,14 @@ loadEmbedScript()
   })
   .catch((err) => {
     root.innerHTML = `
-      <div class="error">
+      <div style="
+        border: 1px solid rgba(239,68,68,0.35);
+        background: rgba(239,68,68,0.08);
+        color: #fecaca;
+        padding: 16px;
+        border-radius: 14px;
+        font-size: 14px;
+      ">
         Failed to load widget: ${escapeHtml(err?.message || String(err))}
       </div>
     `;

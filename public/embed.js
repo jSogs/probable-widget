@@ -3,6 +3,21 @@ class ProbableMarkets extends HTMLElement {
       super();
       this.tooltipEl = null;
       this.chartData = [];
+      this._ctx = null;
+      this._theme = "light";
+      this._timeframe = "ALL";
+      this._selectedIndex = 0;
+      this._markets = [];
+      this._meta = null;
+      this._updated = null;
+      this._loading = null;
+      this._error = null;
+      this._sel = null;
+      this._chartWrap = null;
+      this._canvas = null;
+      this._endsEl = null;
+      this._volumeEl = null;
+      this._tfButtons = [];
     }
   
     async connectedCallback() {
@@ -11,92 +26,355 @@ class ProbableMarkets extends HTMLElement {
       const theme = this.getAttribute("theme") || "light";
       const timeframe = this.getAttribute("timeframe") || "ALL";
   
+      this._theme = theme;
+      this._timeframe = timeframe;
+  
+      // Build UI
       this.innerHTML = `
         <style>
-          @keyframes pmFadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
+          :host { display:block; }
+  
+          @keyframes pmFadeIn { from {opacity:0; transform:translateY(6px)} to {opacity:1; transform:translateY(0)} }
+          @keyframes pmSpin { to { transform: rotate(360deg); } }
+  
+          .pm-card {
+            animation: pmFadeIn 220ms ease-out;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+            background: var(--pm-bg);
+            color: var(--pm-text);
+            border: 1px solid var(--pm-border);
+            border-radius: 18px;
+            box-shadow: var(--pm-shadow);
+            padding: 18px;
           }
-          @keyframes pmSpin {
-            to { transform: rotate(360deg); }
+  
+          /* Theme tokens */
+          .pm-theme-light {
+            --pm-bg: #ffffff;
+            --pm-text: #0f172a;
+            --pm-muted: #64748b;
+            --pm-border: rgba(15,23,42,0.10);
+            --pm-shadow: 0 16px 36px rgba(15,23,42,0.10);
+            --pm-pill-bg: #f1f5f9;
+            --pm-pill-active-bg: #ffffff;
+            --pm-pill-border: rgba(15,23,42,0.08);
+            --pm-grid: rgba(15,23,42,0.07);
+            --pm-blue: #3b82f6;
+            --pm-blue-soft: rgba(59,130,246,0.18);
+            --pm-green: #16a34a;
+            --pm-red: #ef4444;
           }
-          .pm-container { animation: pmFadeIn 0.4s ease-out; }
-          .pm-spinner {
-            width: 24px; height: 24px;
-            border: 2px solid rgba(59,130,246,0.2);
-            border-top-color: #3b82f6;
-            border-radius: 50%;
-            animation: pmSpin 0.8s linear infinite;
+          .pm-theme-dark {
+            --pm-bg: #0b1220;
+            --pm-text: #e5e7eb;
+            --pm-muted: #94a3b8;
+            --pm-border: rgba(255,255,255,0.10);
+            --pm-shadow: 0 18px 40px rgba(0,0,0,0.55);
+            --pm-pill-bg: rgba(255,255,255,0.07);
+            --pm-pill-active-bg: rgba(255,255,255,0.12);
+            --pm-pill-border: rgba(255,255,255,0.12);
+            --pm-grid: rgba(148,163,184,0.18);
+            --pm-blue: #60a5fa;
+            --pm-blue-soft: rgba(96,165,250,0.18);
+            --pm-green: #22c55e;
+            --pm-red: #f87171;
           }
-          .pm-tf-btn { transition: all 0.2s ease; }
-          .pm-tf-btn:hover { background: rgba(59,130,246,0.1); }
-          .pm-tf-btn.active {
-            background: #3b82f6 !important;
-            color: #fff !important;
-            border-color: #3b82f6 !important;
+  
+          /* Header */
+          .pm-header {
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap: 12px;
+            margin-bottom: 10px;
           }
-          .pm-chart-wrap { position: relative; }
+          .pm-header-left {
+            min-width: 0;
+            flex: 1;
+          }
+          .pm-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: var(--pm-muted);
+            margin-bottom: 6px;
+          }
+  
+          .pm-select-wrap { position:relative; width: 100%; }
+          .pm-select {
+            width: 100%;
+            appearance:none;
+            border: 1px solid var(--pm-border);
+            background: color-mix(in srgb, var(--pm-bg) 85%, #f1f5f9 15%);
+            color: var(--pm-text);
+            border-radius: 12px;
+            padding: 10px 36px 10px 12px;
+            font-size: 14px;
+            font-weight: 650;
+            line-height: 1.2;
+            box-shadow: 0 1px 0 rgba(15,23,42,0.04);
+            outline: none;
+            cursor: pointer;
+          }
+          .pm-select:focus {
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--pm-blue) 30%, transparent);
+            border-color: color-mix(in srgb, var(--pm-blue) 60%, var(--pm-border));
+          }
+          .pm-select-wrap::after {
+            content: "▾";
+            position:absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--pm-muted);
+            pointer-events:none;
+            font-size: 14px;
+          }
+  
+          /* Stats row */
+          .pm-stats {
+            display:flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 16px;
+            margin: 12px 0 12px;
+          }
+          .pm-odds {
+            display:flex;
+            align-items: baseline;
+            gap: 12px;
+          }
+          .pm-odds .pm-big {
+            font-size: 52px;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+            line-height: 1;
+          }
+          .pm-odds .pm-big small {
+            font-size: 26px;
+            font-weight: 750;
+            margin-left: 2px;
+          }
+          .pm-delta {
+            display:inline-flex;
+            align-items:center;
+            gap: 6px;
+            font-size: 16px;
+            font-weight: 750;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--pm-green) 14%, transparent);
+            color: var(--pm-green);
+          }
+          .pm-delta.neg {
+            background: color-mix(in srgb, var(--pm-red) 14%, transparent);
+            color: var(--pm-red);
+          }
+          .pm-right-meta {
+            text-align:right;
+            color: var(--pm-muted);
+            font-size: 13px;
+            line-height: 1.2;
+            white-space: nowrap;
+          }
+  
+          /* Chart */
+          .pm-chart-wrap {
+            position: relative;
+            border-radius: 14px;
+            overflow: hidden;
+            background: linear-gradient(180deg, var(--pm-blue-soft) 0%, rgba(0,0,0,0) 65%);
+            border: 1px solid color-mix(in srgb, var(--pm-border) 70%, transparent);
+          }
+          canvas.pm-chart {
+            width: 100%;
+            height: 220px;
+            display:block;
+            cursor: crosshair;
+          }
+  
+          /* Tooltip bubble */
           .pm-tooltip {
-            position: absolute;
-            background: ${theme === "dark" ? "#1f2937" : "#fff"};
-            border: 1px solid ${theme === "dark" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)"};
-            border-radius: 8px;
-            padding: 8px 12px;
-            font-size: 12px;
-            pointer-events: none;
+            position:absolute;
+            pointer-events:none;
+            background: color-mix(in srgb, var(--pm-bg) 92%, #ffffff 8%);
+            border: 1px solid color-mix(in srgb, var(--pm-border) 85%, transparent);
+            border-radius: 16px;
+            padding: 10px 12px;
+            min-width: 92px;
+            box-shadow: 0 14px 28px rgba(15,23,42,0.12);
+            backdrop-filter: blur(8px);
             opacity: 0;
-            transition: opacity 0.15s ease;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            transform: translate(-50%, -110%);
+            transition: opacity 120ms ease;
             z-index: 10;
           }
           .pm-tooltip.visible { opacity: 1; }
+          .pm-tooltip .date {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--pm-muted);
+            margin-bottom: 2px;
+          }
+          .pm-tooltip .price {
+            font-size: 22px;
+            font-weight: 850;
+            letter-spacing: -0.02em;
+            color: var(--pm-text);
+          }
+  
+          /* Controls */
+          .pm-controls {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap: 12px;
+            margin-top: 12px;
+          }
+          .pm-pills {
+            display:inline-flex;
+            align-items:center;
+            gap: 4px;
+            background: var(--pm-pill-bg);
+            border: 1px solid color-mix(in srgb, var(--pm-border) 55%, transparent);
+            border-radius: 999px;
+            padding: 4px;
+          }
+          .pm-pill {
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--pm-muted);
+            font-size: 12px;
+            font-weight: 750;
+            padding: 8px 12px;
+            border-radius: 999px;
+            cursor:pointer;
+            transition: all 160ms ease;
+          }
+          .pm-pill:hover { color: var(--pm-text); }
+          .pm-pill.active {
+            background: var(--pm-pill-active-bg);
+            border-color: var(--pm-pill-border);
+            color: var(--pm-text);
+            box-shadow: 0 10px 18px rgba(15,23,42,0.10);
+          }
+  
+          /* Footer */
+          .pm-footer {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap: 12px;
+            border-top: 1px solid color-mix(in srgb, var(--pm-border) 55%, transparent);
+            margin-top: 14px;
+            padding-top: 12px;
+            color: var(--pm-muted);
+            font-size: 13px;
+          }
+  
+          /* Loading & error */
+          .pm-loading {
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding: 30px 0;
+          }
+          .pm-spinner {
+            width: 28px; height: 28px;
+            border-radius: 999px;
+            border: 2px solid color-mix(in srgb, var(--pm-blue) 20%, transparent);
+            border-top-color: var(--pm-blue);
+            animation: pmSpin 0.8s linear infinite;
+          }
+          .pm-error {
+            margin-top: 10px;
+            font-size: 13px;
+            color: var(--pm-red);
+            display:none;
+          }
         </style>
-        <div class="pm-container" style="${containerStyle(theme)}">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
-            <div style="font-weight:800;font-size:14px;letter-spacing:-0.01em;">Prediction markets</div>
-            <select id="pm_sel" style="${selectStyle(theme)}"></select>
-          </div>
-          <div id="pm_meta" style="margin-top:12px;"></div>
-          <div id="pm_loading" style="display:flex;justify-content:center;padding:40px 0;">
-            <div class="pm-spinner"></div>
-          </div>
-          <div class="pm-chart-wrap" style="margin-top:12px;display:none;" id="pm_chart_wrap">
-            <canvas id="pm_chart" style="width:100%;height:140px;cursor:crosshair;"></canvas>
-            <div class="pm-tooltip" id="pm_tooltip"></div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:12px;align-items:center;justify-content:space-between;">
-            <div id="pm_updated" style="font-size:11px;opacity:.6;"></div>
-            <div style="display:flex;gap:6px;">
-              ${["1D","1W","1M","ALL"].map(t => `<button data-tf="${t}" class="pm-tf-btn${t === timeframe ? ' active' : ''}" style="${tfBtnStyle(theme)}">${t}</button>`).join("")}
+  
+        <div class="pm-card ${theme === "dark" ? "pm-theme-dark" : "pm-theme-light"}">
+          <div class="pm-header">
+            <div class="pm-header-left">
+              <div class="pm-label">Prediction markets</div>
+              <div class="pm-select-wrap">
+                <select id="pm_sel" class="pm-select"></select>
+              </div>
             </div>
           </div>
-          <div id="pm_error" style="margin-top:10px;font-size:12px;color:#dc2626;display:none;"></div>
+  
+          <div class="pm-stats" id="pm_stats" style="display:none;">
+            <div class="pm-odds">
+              <div class="pm-big" id="pm_big">--<small>%</small></div>
+              <div class="pm-delta" id="pm_delta">↗ +0.0%</div>
+            </div>
+            <div class="pm-right-meta">
+              <div id="pm_ends">Ends —</div>
+            </div>
+          </div>
+  
+          <div id="pm_loading" class="pm-loading">
+            <div class="pm-spinner"></div>
+          </div>
+  
+          <div id="pm_chart_wrap" class="pm-chart-wrap" style="display:none;">
+            <canvas id="pm_chart" class="pm-chart"></canvas>
+            <div id="pm_tooltip" class="pm-tooltip"></div>
+          </div>
+  
+          <div class="pm-controls" id="pm_controls" style="display:none;">
+            <div class="pm-pills" id="pm_pills">
+              ${["1D","1W","1M","ALL"].map(t => `<button type="button" data-tf="${t}" class="pm-pill${t === timeframe ? " active" : ""}">${t}</button>`).join("")}
+            </div>
+            <div class="pm-right-meta">
+              <div id="pm_updated">Updated —</div>
+            </div>
+          </div>
+  
+          <div class="pm-footer" id="pm_footer" style="display:none;">
+            <span id="pm_volume">Volume: —</span>
+            <span>Updated just now</span>
+          </div>
+  
+          <div id="pm_error" class="pm-error"></div>
         </div>
       `;
   
-      const sel = this.querySelector("#pm_sel");
-      const meta = this.querySelector("#pm_meta");
-      const updated = this.querySelector("#pm_updated");
-      const canvas = this.querySelector("#pm_chart");
-      const chartWrap = this.querySelector("#pm_chart_wrap");
-      const loading = this.querySelector("#pm_loading");
-      const errorEl = this.querySelector("#pm_error");
+      // Cache elements
+      this._sel = this.querySelector("#pm_sel");
+      this._canvas = this.querySelector("#pm_chart");
+      this._chartWrap = this.querySelector("#pm_chart_wrap");
+      this._loading = this.querySelector("#pm_loading");
+      this._error = this.querySelector("#pm_error");
       this.tooltipEl = this.querySelector("#pm_tooltip");
+      this._updated = this.querySelector("#pm_updated");
+      this._endsEl = this.querySelector("#pm_ends");
+      this._volumeEl = this.querySelector("#pm_volume");
+      this._tfButtons = [...this.querySelectorAll(".pm-pill")];
   
-      let markets = [];
-      let currentIndex = 0;
-      let currentTf = timeframe;
+      const statsRow = this.querySelector("#pm_stats");
+      const controlsRow = this.querySelector("#pm_controls");
+      const footerRow = this.querySelector("#pm_footer");
+      const bigEl = this.querySelector("#pm_big");
+      const deltaEl = this.querySelector("#pm_delta");
   
       const showError = (msg) => {
-        errorEl.style.display = "block";
-        errorEl.textContent = msg;
-        loading.style.display = "none";
+        this._error.style.display = "block";
+        this._error.textContent = msg;
+        this._loading.style.display = "none";
       };
   
-      const updateActiveBtn = () => {
-        this.querySelectorAll(".pm-tf-btn").forEach(btn => {
-          btn.classList.toggle("active", btn.getAttribute("data-tf") === currentTf);
-        });
+      const setLoading = (isLoading) => {
+        this._loading.style.display = isLoading ? "flex" : "none";
+        if (isLoading) this._chartWrap.style.display = "none";
+      };
+  
+      const setVisible = () => {
+        statsRow.style.display = "flex";
+        this._chartWrap.style.display = "block";
+        controlsRow.style.display = "flex";
+        footerRow.style.display = "flex";
       };
   
       try {
@@ -104,162 +382,146 @@ class ProbableMarkets extends HTMLElement {
         const res = await fetch(`${apiBase}/v1/widget/markets`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ articleUrl, query, limit: 5 })
+          body: JSON.stringify({ articleUrl, query, limit: 5 }),
         });
+  
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-        markets = Array.isArray(data.markets) ? data.markets : [];
-        
-        if (!markets.length) {
-          loading.style.display = "none";
-          meta.innerHTML = `<div style="font-size:13px;opacity:.7;">No relevant markets found.</div>`;
+  
+        this._markets = Array.isArray(data.markets) ? data.markets : [];
+  
+        if (!this._markets.length) {
+          setLoading(false);
+          showError("No relevant markets found.");
           return;
         }
   
-        sel.innerHTML = markets.map((m, i) => `<option value="${i}">${escapeHtml(m.title)}</option>`).join("");
-        updated.textContent = `Updated ${new Date(data.updatedAt || Date.now()).toLocaleString()}`;
+        // Populate dropdown
+        this._sel.innerHTML = this._markets
+          .map((m, i) => `<option value="${i}">${escapeHtml(m.title || m.question || "Market")}</option>`)
+          .join("");
   
-        let ctx = initCanvas(canvas);
-        
-        // Setup hover events
-        canvas.addEventListener("mousemove", (e) => this.handleHover(e, canvas, ctx));
-        canvas.addEventListener("mouseleave", () => this.hideTooltip());
+        this._updated.textContent = `Updated ${new Date(data.updatedAt || Date.now()).toLocaleString()}`;
+  
+        // Init canvas + events
+        this._ctx = initCanvas(this._canvas);
+  
+        this._canvas.addEventListener("mousemove", (e) => this.handleHover(e));
+        this._canvas.addEventListener("mouseleave", () => this.hideTooltip());
   
         window.addEventListener("resize", () => {
-          ctx = initCanvas(canvas);
-          renderChart(markets[currentIndex], currentTf, ctx, this);
+          this._ctx = initCanvas(this._canvas);
+          this.renderAll();
         });
   
-        const renderAll = async () => {
-          loading.style.display = "flex";
-          chartWrap.style.display = "none";
-          renderMeta(markets[currentIndex], meta, theme);
-          await renderChart(markets[currentIndex], currentTf, ctx, this);
-          loading.style.display = "none";
-          chartWrap.style.display = "block";
-        };
-  
-        sel.addEventListener("change", async (e) => {
-          currentIndex = Number(e.target.value || 0);
-          await renderAll();
+        // Dropdown change
+        this._sel.addEventListener("change", () => {
+          this._selectedIndex = Number(this._sel.value || 0);
+          this.renderAll();
         });
   
-        this.querySelectorAll(".pm-tf-btn").forEach(btn => {
-          btn.addEventListener("click", async () => {
-            currentTf = btn.getAttribute("data-tf") || "ALL";
-            updateActiveBtn();
-            await renderAll();
+        // Timeframe pills
+        this._tfButtons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            this._timeframe = btn.getAttribute("data-tf") || "ALL";
+            this._tfButtons.forEach((b) =>
+              b.classList.toggle("active", b.getAttribute("data-tf") === this._timeframe)
+            );
+            this.renderAll();
           });
         });
   
-        await renderAll();
+        // Initial render
+        setVisible();
+        await this.renderAll({ bigEl, deltaEl });
       } catch (e) {
-        showError(`Widget failed to load: ${String(e.message || e)}`);
+        showError(`Widget failed to load: ${String(e?.message || e)}`);
       }
     }
   
-    handleHover(e, canvas, ctx) {
-      if (!this.chartData.length || !this.tooltipEl) return;
-      
-      const rect = canvas.getBoundingClientRect();
+    async renderAll(extra = {}) {
+      const { bigEl, deltaEl } = extra;
+      const m = this._markets[this._selectedIndex];
+      if (!m) return;
+  
+      // Stats
+      const yes = clamp01(m.yes);
+      const pct = (yes * 100).toFixed(0);
+  
+      const trend = Number(m.trend24h || 0) * 100; // already a fraction
+      const trendAbs = Math.abs(trend).toFixed(1);
+      const trendSign = trend >= 0 ? "+" : "-";
+  
+      if (bigEl) bigEl.innerHTML = `${pct}<small>%</small>`;
+      if (deltaEl) {
+        deltaEl.classList.toggle("neg", trend < 0);
+        deltaEl.textContent = `${trend >= 0 ? "↗" : "↘"} ${trendSign}${trendAbs}%`;
+      }
+  
+      // Ends + Volume
+      this._endsEl.textContent = m.endTime
+        ? `Ends ${new Date(m.endTime).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
+        : `Ends ${escapeHtml(m.endDate || "—")}`;
+      this._volumeEl.textContent = `Volume: ${escapeHtml(m.volume != null ? String(m.volume) : "—")}`;
+  
+      // Chart data + draw
+      this._chartWrap.style.display = "none";
+      this._loading.style.display = "flex";
+  
+      await renderChart(m, this._timeframe, this._ctx, this);
+  
+      this._loading.style.display = "none";
+      this._chartWrap.style.display = "block";
+    }
+  
+    handleHover(e) {
+      if (!this.chartData.length || !this.tooltipEl || !this._canvas) return;
+  
+      const rect = this._canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const w = rect.width;
+  
       const pts = this.chartData;
-      
-      const xs = pts.map(p => p.t);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      
-      // Find closest point
-      const ratio = x / w;
-      const targetT = minX + ratio * (maxX - minX);
+      const minT = pts[0].t;
+      const maxT = pts[pts.length - 1].t;
+  
+      const ratio = x / Math.max(1, w);
+      const targetT = minT + ratio * (maxT - minT);
+  
       let closest = pts[0];
-      let closestDist = Infinity;
-      
+      let best = Infinity;
       for (const p of pts) {
-        const dist = Math.abs(p.t - targetT);
-        if (dist < closestDist) {
-          closestDist = dist;
+        const d = Math.abs(p.t - targetT);
+        if (d < best) {
+          best = d;
           closest = p;
         }
       }
-      
+  
       const date = new Date(closest.t);
-      const dateStr = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-      const pct = Math.round(closest.p * 100);
-      
+      const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const pct = (closest.p * 100).toFixed(1);
+  
       this.tooltipEl.innerHTML = `
-        <div style="font-weight:600;margin-bottom:2px;">${pct}%</div>
-        <div style="opacity:0.7;">${dateStr}</div>
+        <div class="date">${escapeHtml(dateStr)}</div>
+        <div class="price">${escapeHtml(pct)}%</div>
       `;
-      
-      // Position tooltip
-      const tooltipX = Math.min(Math.max(x - 40, 0), rect.width - 90);
-      this.tooltipEl.style.left = `${tooltipX}px`;
-      this.tooltipEl.style.top = `-50px`;
+  
+      const pad = 16; // keep tooltip inside bounds
+      const clampedX = Math.min(Math.max(x, pad), rect.width - pad);
+      this.tooltipEl.style.left = `${clampedX}px`;
+      this.tooltipEl.style.top = `0px`;
       this.tooltipEl.classList.add("visible");
     }
   
     hideTooltip() {
-      if (this.tooltipEl) {
-        this.tooltipEl.classList.remove("visible");
-      }
+      if (this.tooltipEl) this.tooltipEl.classList.remove("visible");
     }
   }
   
   customElements.define("probable-markets", ProbableMarkets);
   
-  function containerStyle(theme) {
-    const base = "font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;border-radius:16px;padding:16px;";
-    return theme === "dark"
-      ? base + "background:#0f172a;color:#e2e8f0;border:1px solid rgba(255,255,255,0.08);box-shadow:0 4px 24px rgba(0,0,0,0.4);"
-      : base + "background:#ffffff;color:#0f172a;border:1px solid rgba(0,0,0,0.08);box-shadow:0 4px 24px rgba(0,0,0,0.06);";
-  }
-  
-  function selectStyle(theme) {
-    const base = "padding:8px 12px;border-radius:10px;font-size:13px;max-width:420px;outline:none;cursor:pointer;";
-    return theme === "dark"
-      ? base + "background:#1e293b;color:#e2e8f0;border:1px solid rgba(255,255,255,0.1);"
-      : base + "background:#f8fafc;color:#0f172a;border:1px solid rgba(0,0,0,0.1);";
-  }
-  
-  function tfBtnStyle(theme) {
-    const base = "padding:6px 10px;border-radius:8px;border:1px solid;background:transparent;cursor:pointer;font-size:12px;font-weight:500;";
-    return theme === "dark"
-      ? base + "color:#94a3b8;border-color:rgba(255,255,255,0.1);"
-      : base + "color:#64748b;border-color:rgba(0,0,0,0.1);";
-  }
-  
-  function renderMeta(m, metaEl, theme) {
-    const pct = (x) => `${Math.round((Number(x) || 0) * 100)}%`;
-    const trend = (t) => {
-      const n = Number(t) || 0;
-      if (n === 0) return "—";
-      const s = n > 0 ? "+" : "";
-      return `${s}${pct(n)}`;
-    };
-    const trendColor = (t) => {
-      const n = Number(t) || 0;
-      if (n > 0) return "#22c55e";
-      if (n < 0) return "#ef4444";
-      return theme === "dark" ? "#94a3b8" : "#64748b";
-    };
-  
-    metaEl.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;">
-        <a href="${m.url || "#"}" target="_blank" rel="noopener"
-           style="text-decoration:none;color:inherit;font-weight:600;font-size:15px;line-height:1.4;flex:1;transition:opacity 0.2s;"
-           onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">
-          ${escapeHtml(m.title)}
-        </a>
-        <div style="text-align:right;min-width:100px;">
-          <div style="font-weight:800;font-size:24px;letter-spacing:-0.02em;">Yes ${pct(m.yes)}</div>
-          <div style="font-size:12px;color:${trendColor(m.trend24h)};font-weight:500;">24h ${trend(m.trend24h)}</div>
-          <div style="font-size:11px;opacity:.6;margin-top:2px;">${escapeHtml(m.platform || "")}</div>
-        </div>
-      </div>
-    `;
-  }
+  /* ---------- Chart drawing ---------- */
   
   function initCanvas(canvas) {
     const dpr = window.devicePixelRatio || 1;
@@ -275,58 +537,86 @@ class ProbableMarkets extends HTMLElement {
     let series = Array.isArray(m.series) ? m.series : null;
     if (!series) {
       const apiBase = getApiBase();
-      const r = await fetch(`${apiBase}/v1/widget/series?id=${encodeURIComponent(m.id)}&tf=${encodeURIComponent(tf)}`);
+      const r = await fetch(
+        `${apiBase}/v1/widget/series?id=${encodeURIComponent(m.id)}&tf=${encodeURIComponent(tf)}`
+      );
       const d = await r.json().catch(() => ({}));
       series = Array.isArray(d.series) ? d.series : [];
     }
+  
     const pts = filterSeries(series, tf);
     component.chartData = pts;
-    drawLine(ctx, pts);
+    drawOddsChart(ctx, pts, tf);
   }
   
   function filterSeries(series, tf) {
     const now = Date.now();
-    const ms = ({ "1D": 864e5, "1W": 7 * 864e5, "1M": 30 * 864e5, "ALL": Infinity }[tf] ?? Infinity);
-    return (series || [])
-      .filter(p => typeof p?.t === "number" && typeof p?.p === "number")
-      .filter(p => (now - p.t) <= ms)
-      .map(p => ({ t: p.t, p: clamp01(p.p) }));
+    const ms =
+      { "1D": 864e5, "1W": 7 * 864e5, "1M": 30 * 864e5, ALL: Infinity }[tf] ?? Infinity;
+  
+    const filtered = (series || [])
+      .filter((p) => typeof p?.t === "number" && typeof p?.p === "number")
+      .filter((p) => now - p.t <= ms)
+      .map((p) => ({ t: p.t, p: clamp01(p.p) }));
+  
+    // Ensure sorted by time
+    filtered.sort((a, b) => a.t - b.t);
+    return filtered;
   }
   
-  function drawLine(ctx, pts) {
+  function drawOddsChart(ctx, pts, tf) {
     const w = ctx.canvas.getBoundingClientRect().width;
     const h = ctx.canvas.getBoundingClientRect().height;
     ctx.clearRect(0, 0, w, h);
   
-    // Draw subtle grid lines
-    ctx.strokeStyle = "rgba(148,163,184,0.15)";
+    // Layout paddings for axes labels
+    const padLeft = 42;
+    const padRight = 10;
+    const padTop = 12;
+    const padBottom = 26;
+  
+    const plotW = w - padLeft - padRight;
+    const plotH = h - padTop - padBottom;
+  
+    // Grid + y-axis ticks
     ctx.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) {
-      const y = (h * i) / 4;
+    ctx.strokeStyle = "rgba(148,163,184,0.18)";
+  
+    const yTicks = [0, 25, 50, 75, 100];
+  
+    // Y axis labels
+    ctx.fillStyle = "rgba(100,116,139,0.95)";
+    ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  
+    for (const yv of yTicks) {
+      const y = padTop + (1 - yv / 100) * plotH;
+      // grid line
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(w, y);
+      ctx.moveTo(padLeft, y);
+      ctx.lineTo(w - padRight, y);
       ctx.stroke();
+  
+      // label
+      ctx.fillText(`${yv}%`, 6, y + 4);
     }
   
     if (!pts.length) return;
   
-    const xs = pts.map(p => p.t);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const pad = 4;
-    const xScale = (x) => (maxX === minX ? pad : ((x - minX) / (maxX - minX)) * (w - pad * 2) + pad);
-    const yScale = (y) => h - (y * (h - pad * 2) + pad);
+    const minT = pts[0].t;
+    const maxT = pts[pts.length - 1].t;
   
-    // Create gradient fill
-    const gradient = ctx.createLinearGradient(0, 0, 0, h);
-    gradient.addColorStop(0, "rgba(59,130,246,0.3)");
-    gradient.addColorStop(0.5, "rgba(59,130,246,0.1)");
-    gradient.addColorStop(1, "rgba(59,130,246,0)");
+    const xScale = (t) => padLeft + ((t - minT) / Math.max(1, maxT - minT)) * plotW;
+    const yScale = (p) => padTop + (1 - p) * plotH;
   
-    // Draw filled area with bezier curves
+    // Area gradient
+    const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
+    grad.addColorStop(0, "rgba(59,130,246,0.28)");
+    grad.addColorStop(0.7, "rgba(59,130,246,0.06)");
+    grad.addColorStop(1, "rgba(59,130,246,0.00)");
+  
+    // Area path (smooth)
     ctx.beginPath();
-    ctx.moveTo(xScale(pts[0].t), h);
+    ctx.moveTo(xScale(pts[0].t), padTop + plotH);
     ctx.lineTo(xScale(pts[0].t), yScale(pts[0].p));
   
     for (let i = 1; i < pts.length; i++) {
@@ -340,15 +630,14 @@ class ProbableMarkets extends HTMLElement {
       ctx.bezierCurveTo(midX, prevY, midX, currY, currX, currY);
     }
   
-    ctx.lineTo(xScale(pts[pts.length - 1].t), h);
+    ctx.lineTo(xScale(pts[pts.length - 1].t), padTop + plotH);
     ctx.closePath();
-    ctx.fillStyle = gradient;
+    ctx.fillStyle = grad;
     ctx.fill();
   
-    // Draw the line on top
+    // Line stroke
     ctx.beginPath();
     ctx.moveTo(xScale(pts[0].t), yScale(pts[0].p));
-  
     for (let i = 1; i < pts.length; i++) {
       const prev = pts[i - 1];
       const curr = pts[i];
@@ -359,12 +648,33 @@ class ProbableMarkets extends HTMLElement {
       const midX = (prevX + currX) / 2;
       ctx.bezierCurveTo(midX, prevY, midX, currY, currX, currY);
     }
-  
     ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 3;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.stroke();
+  
+    // X-axis labels (start / mid / end)
+    const fmt = (t) =>
+      new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  
+    const t0 = minT;
+    const t1 = minT + (maxT - minT) / 2;
+    const t2 = maxT;
+  
+    ctx.fillStyle = "rgba(100,116,139,0.95)";
+    ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  
+    const yLabel = padTop + plotH + 18;
+    ctx.fillText(fmt(t0), padLeft, yLabel);
+  
+    const midText = fmt(t1);
+    const midW = ctx.measureText(midText).width;
+    ctx.fillText(midText, padLeft + plotW / 2 - midW / 2, yLabel);
+  
+    const endText = fmt(t2);
+    const endW = ctx.measureText(endText).width;
+    ctx.fillText(endText, padLeft + plotW - endW, yLabel);
   }
   
   function clamp01(x) {
@@ -383,7 +693,9 @@ class ProbableMarkets extends HTMLElement {
   }
   
   function getApiBase() {
-    const script = document.currentScript || [...document.scripts].find(s => (s.src || "").includes("embed.js"));
+    const script =
+      document.currentScript ||
+      [...document.scripts].find((s) => (s.src || "").includes("embed.js"));
     if (script?.src) return new URL(script.src).origin;
     return window.location.origin;
   }
