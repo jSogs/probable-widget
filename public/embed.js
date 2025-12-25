@@ -672,14 +672,6 @@ function clamp01(x) {
 
 function getProbabilityFraction(m) {
   if (Number.isFinite(m?.yes)) return clamp01(m.yes);
-  if (Number.isFinite(m?.probability)) return clamp01(m.probability / 100);
-
-  const op = m?.outcome_prices || m?.outcomePrices || m?.outcome_prices_json;
-  if (op && typeof op === "object") {
-    const v = op.Yes ?? op.yes ?? op.YES;
-    if (Number.isFinite(v)) return clamp01(Number(v));
-    if (Array.isArray(op) && Number.isFinite(op[0])) return clamp01(Number(op[0]));
-  }
 
   return 0.5;
 }
