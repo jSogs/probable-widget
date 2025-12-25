@@ -1,4 +1,4 @@
-// embed.js — drop-in working version with dropdown market selector
+// embed.js — DROP-IN FILE (dropdown works + % from API/DB + chart axes + hover tooltip)
 // Usage:
 // <script async src="https://YOUR_DOMAIN/embed.js"></script>
 // <probable-markets query="bitcoin" theme="light" timeframe="1W" limit="5"></probable-markets>
@@ -6,17 +6,20 @@
 class ProbableMarkets extends HTMLElement {
   constructor() {
     super();
+
     this._theme = "light";
     this._timeframe = "ALL";
-    this._selectedIndex = 0;
+
     this._markets = [];
+    this._selectedIndex = 0;
+
     this.chartData = [];
     this._scale = null;
 
     // DOM refs
     this._canvas = null;
     this._ctx = null;
-    this.tooltipEl = null;
+    this._tooltipEl = null;
 
     this._selectEl = null;
     this._titleEl = null;
@@ -102,12 +105,17 @@ class ProbableMarkets extends HTMLElement {
           --pm-select-border: rgba(255,255,255,0.14);
         }
 
-        .pm-header { margin-bottom: 10px; display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+        .pm-header {
+          margin-bottom: 10px;
+          display:flex;
+          justify-content:space-between;
+          gap:12px;
+          align-items:flex-start;
+        }
         .pm-sub { color: var(--pm-muted); font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.03em; }
         .pm-title { margin: 6px 0 0; font-size: 18px; font-weight: 850; letter-spacing: -0.02em; line-height: 1.2; }
 
-        /* Dropdown */
-        .pm-select-wrap { min-width: 210px; }
+        .pm-select-wrap { min-width: 240px; }
         .pm-select {
           width: 100%;
           border-radius: 12px;
@@ -116,7 +124,7 @@ class ProbableMarkets extends HTMLElement {
           background: var(--pm-select-bg);
           color: var(--pm-text);
           font-size: 13px;
-          font-weight: 700;
+          font-weight: 750;
           outline: none;
           cursor: pointer;
         }
@@ -237,7 +245,7 @@ class ProbableMarkets extends HTMLElement {
           </div>
 
           <div class="pm-select-wrap">
-            <select class="pm-select" id="pm_select">
+            <select class="pm-select" id="pm_select" aria-label="Choose market">
               <option>Loading…</option>
             </select>
           </div>
@@ -284,7 +292,7 @@ class ProbableMarkets extends HTMLElement {
   cacheDom() {
     this._canvas = this.querySelector("#pm_canvas");
     this._ctx = this._canvas.getContext("2d");
-    this.tooltipEl = this.querySelector("#pm_tooltip");
+    this._tooltipEl = this.querySelector("#pm_tooltip");
 
     this._selectEl = this.querySelector("#pm_select");
     this._titleEl = this.querySelector("#pm_title");
@@ -311,12 +319,14 @@ class ProbableMarkets extends HTMLElement {
       });
     });
 
-    // dropdown market selection
+    // dropdown uses MARKET ID (not index) so it always works
     this._selectEl.addEventListener("change", () => {
-      const idx = Number(this._selectEl.value);
-      if (Number.isFinite(idx)) {
+      const id = this._selectEl.value;
+      const idx = this._markets.findIndex((m) => String(m.id) === String(id));
+      if (idx >= 0) {
         this._selectedIndex = idx;
         this.updateUI();
+        this.hideTooltip();
       }
     });
 
@@ -355,9 +365,8 @@ class ProbableMarkets extends HTMLElement {
       const when = data.updatedAt ? new Date(data.updatedAt) : new Date();
       this._updatedEl.textContent = `Updated ${when.toLocaleString()}`;
 
-      this.populateDropdown();
-
       this._selectedIndex = 0;
+      this.populateDropdown();
       this.setLoading(false);
     } catch (e) {
       this.setLoading(false);
@@ -368,47 +377,49 @@ class ProbableMarkets extends HTMLElement {
   }
 
   populateDropdown() {
-    // Clear
     this._selectEl.innerHTML = "";
 
     if (!this._markets.length) {
       const opt = document.createElement("option");
       opt.textContent = "No markets";
-      opt.value = "0";
+      opt.value = "";
       this._selectEl.appendChild(opt);
       return;
     }
 
-    this._markets.forEach((m, i) => {
+    for (const m of this._markets) {
       const opt = document.createElement("option");
-      opt.value = String(i);
-      opt.textContent = truncate(m.title || m.question || `Market ${i + 1}`, 52);
+      opt.value = String(m.id); // ✅ stable selection
+      opt.textContent = truncate(m.title || m.question || "Market", 60);
       this._selectEl.appendChild(opt);
-    });
+    }
 
-    this._selectEl.value = String(this._selectedIndex);
+    const selected = this._markets[this._selectedIndex];
+    this._selectEl.value = selected ? String(selected.id) : String(this._markets[0].id);
   }
 
   updateUI() {
     const m = this._markets[this._selectedIndex];
     if (!m) return;
 
-    this._selectEl.value = String(this._selectedIndex);
+    // keep dropdown in sync
+    this._selectEl.value = String(m.id);
 
-    // Title
+    // title
     this._titleEl.textContent = m.question || m.title || "Market";
 
-    // Probability (from DB/API)
-    const yes = getProbabilityFraction(m) ?? 0;
+    // probability from API/DB
+    const yes = getProbabilityFraction(m);
     this._priceEl.textContent = `${Math.round(yes * 100)}%`;
 
     // 24h delta
-    const change = getChange24hFraction(m); // fraction
+    const change = getChange24hFraction(m);
     const changePct = change * 100;
     this._deltaEl.classList.toggle("neg", changePct < 0);
-    this._deltaEl.textContent = `${changePct >= 0 ? "↗" : "↘"} ${changePct >= 0 ? "+" : "-"}${Math.abs(changePct).toFixed(1)}%`;
+    this._deltaEl.textContent =
+      `${changePct >= 0 ? "↗" : "↘"} ${changePct >= 0 ? "+" : "-"}${Math.abs(changePct).toFixed(1)}%`;
 
-    // Ends + Volume (support both normalized API + raw DB names)
+    // ends / volume (support normalized + raw db)
     const endTime = m.endTime ?? m.end_time ?? null;
     const endStr = endTime
       ? new Date(endTime).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
@@ -418,7 +429,7 @@ class ProbableMarkets extends HTMLElement {
     const vol = m.volume ?? m.volume_num ?? null;
     this._volEl.textContent = `Volume: ${vol == null ? "—" : `$${Number(vol).toLocaleString()}`}`;
 
-    // Series (prefer API series; otherwise generate synthetic for demo)
+    // series
     this.chartData = normalizeSeries(m.series);
     if (!this.chartData.length) this.chartData = generateSeries(yes);
 
@@ -446,12 +457,16 @@ class ProbableMarkets extends HTMLElement {
   resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
     const rect = this._canvas.getBoundingClientRect();
+
     const w = Math.max(1, Math.floor(rect.width * dpr));
     const h = Math.max(1, Math.floor(rect.height * dpr));
+
     if (this._canvas.width !== w || this._canvas.height !== h) {
       this._canvas.width = w;
       this._canvas.height = h;
     }
+
+    // prevents cumulative scaling
     this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
@@ -502,11 +517,10 @@ class ProbableMarkets extends HTMLElement {
     grad.addColorStop(0.7, getCssVar(this, "--pm-area-mid") || "rgba(59,130,246,0.06)");
     grad.addColorStop(1, getCssVar(this, "--pm-area-bot") || "rgba(59,130,246,0.00)");
 
-    // area path
+    // area
     ctx.beginPath();
     ctx.moveTo(xScale(pts[0].t), padTop + plotH);
     ctx.lineTo(xScale(pts[0].t), yScale(pts[0].p));
-
     for (let i = 1; i < pts.length; i++) {
       const prev = pts[i - 1];
       const curr = pts[i];
@@ -517,7 +531,6 @@ class ProbableMarkets extends HTMLElement {
       const midX = (prevX + currX) / 2;
       ctx.bezierCurveTo(midX, prevY, midX, currY, currX, currY);
     }
-
     ctx.lineTo(xScale(pts[pts.length - 1].t), padTop + plotH);
     ctx.closePath();
     ctx.fillStyle = grad;
@@ -563,7 +576,8 @@ class ProbableMarkets extends HTMLElement {
   }
 
   handleHover(e) {
-    if (!this._scale || !this.tooltipEl) return;
+    if (!this._scale || !this._tooltipEl) return;
+
     const pts = this.getFilteredSeries();
     if (!pts || pts.length < 2) return;
 
@@ -571,6 +585,7 @@ class ProbableMarkets extends HTMLElement {
     const mouseX = e.clientX - rect.left;
 
     const { padLeft, plotW, plotH, padTop, minT, maxT } = this._scale;
+
     const ratio = Math.min(Math.max((mouseX - padLeft) / Math.max(1, plotW), 0), 1);
     const targetT = minT + ratio * (maxT - minT);
 
@@ -594,14 +609,14 @@ class ProbableMarkets extends HTMLElement {
     const pad = 18;
     const clampedX = Math.min(Math.max(x, pad), rect.width - pad);
 
-    this.tooltipEl.style.left = `${clampedX}px`;
-    this.tooltipEl.style.top = `${y}px`;
-    this.tooltipEl.classList.add("visible");
+    this._tooltipEl.style.left = `${clampedX}px`;
+    this._tooltipEl.style.top = `${y}px`;
+    this._tooltipEl.classList.add("visible");
   }
 
   hideTooltip() {
-    if (!this.tooltipEl) return;
-    this.tooltipEl.classList.remove("visible");
+    if (!this._tooltipEl) return;
+    this._tooltipEl.classList.remove("visible");
   }
 
   setLoading(on) {
@@ -678,22 +693,15 @@ function generateSeries(currentYes) {
   return pts;
 }
 
-/**
- * IMPORTANT: This is where your "50%" bug comes from.
- * If none of these fields exist in the API payload, it falls back to 0.5.
- */
+// Pull the probability from what your API actually returns.
+// Best case: API returns m.yes (0..1). Otherwise tries outcome_prices.
 function getProbabilityFraction(m) {
-  // 1) normalized API field (best)
-  return m.yes;
   if (Number.isFinite(m?.yes)) return clamp01(m.yes);
 
-  // 2) if API sends percent (0..100)
   if (Number.isFinite(m?.probability)) return clamp01(m.probability / 100);
 
-  // 3) raw db fields (snake/camel)
-  const op = m?.outcome_prices ?? m?.outcomePrices ?? m?.outcome_prices_json ?? null;
+  const op = m?.outcome_prices ?? m?.outcomePrices ?? null;
 
-  // if outcome_prices arrives as JSON string
   if (typeof op === "string") {
     try {
       const parsed = JSON.parse(op);
@@ -703,30 +711,23 @@ function getProbabilityFraction(m) {
     }
   }
 
-  // if object like {"Yes":0.62}
   if (op && typeof op === "object" && !Array.isArray(op)) {
     const v = op.Yes ?? op.yes ?? op.YES;
     if (Number.isFinite(v)) return clamp01(Number(v));
-
-    // if it’s something like {"0":0.62,"1":0.38} or weird keys
     const first = Object.values(op).find((x) => Number.isFinite(x));
     if (first != null) return clamp01(Number(first));
   }
 
-  // if array like [0.62,0.38]
   if (Array.isArray(op) && op.length) {
     const first = op.find((x) => Number.isFinite(x));
     if (first != null) return clamp01(Number(first));
   }
 
-  // fallback
   return 0.5;
 }
 
 function getChange24hFraction(m) {
-  // normalized API field
   if (Number.isFinite(m?.trend24h)) return Number(m.trend24h);
-  // some APIs use percent points
   if (Number.isFinite(m?.change24h)) return Number(m.change24h) / 100;
   if (Number.isFinite(m?.delta24h)) return Number(m.delta24h);
   return 0;
