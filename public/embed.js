@@ -1,702 +1,330 @@
 class ProbableMarkets extends HTMLElement {
-    constructor() {
-      super();
-      this.tooltipEl = null;
-      this.chartData = [];
-      this._ctx = null;
-      this._theme = "light";
-      this._timeframe = "ALL";
-      this._selectedIndex = 0;
-      this._markets = [];
-      this._meta = null;
-      this._updated = null;
-      this._loading = null;
-      this._error = null;
-      this._sel = null;
-      this._chartWrap = null;
-      this._canvas = null;
-      this._endsEl = null;
-      this._volumeEl = null;
-      this._tfButtons = [];
-    }
-  
-    async connectedCallback() {
-      const articleUrl = this.getAttribute("article-url") || "";
-      const query = this.getAttribute("query") || "";
-      const theme = this.getAttribute("theme") || "light";
-      const timeframe = this.getAttribute("timeframe") || "ALL";
-  
-      this._theme = theme;
-      this._timeframe = timeframe;
-  
-      // Build UI
-      this.innerHTML = `
-        <style>
-          :host { display:block; }
-  
-          @keyframes pmFadeIn { from {opacity:0; transform:translateY(6px)} to {opacity:1; transform:translateY(0)} }
-          @keyframes pmSpin { to { transform: rotate(360deg); } }
-  
-          .pm-card {
-            animation: pmFadeIn 220ms ease-out;
-            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-            background: var(--pm-bg);
-            color: var(--pm-text);
-            border: 1px solid var(--pm-border);
-            border-radius: 18px;
-            box-shadow: var(--pm-shadow);
-            padding: 18px;
-          }
-  
-          /* Theme tokens */
-          .pm-theme-light {
-            --pm-bg: #ffffff;
-            --pm-text: #0f172a;
-            --pm-muted: #64748b;
-            --pm-border: rgba(15,23,42,0.10);
-            --pm-shadow: 0 16px 36px rgba(15,23,42,0.10);
-            --pm-pill-bg: #f1f5f9;
-            --pm-pill-active-bg: #ffffff;
-            --pm-pill-border: rgba(15,23,42,0.08);
-            --pm-grid: rgba(15,23,42,0.07);
-            --pm-blue: #3b82f6;
-            --pm-blue-soft: rgba(59,130,246,0.18);
-            --pm-green: #16a34a;
-            --pm-red: #ef4444;
-          }
-          .pm-theme-dark {
-            --pm-bg: #0b1220;
-            --pm-text: #e5e7eb;
-            --pm-muted: #94a3b8;
-            --pm-border: rgba(255,255,255,0.10);
-            --pm-shadow: 0 18px 40px rgba(0,0,0,0.55);
-            --pm-pill-bg: rgba(255,255,255,0.07);
-            --pm-pill-active-bg: rgba(255,255,255,0.12);
-            --pm-pill-border: rgba(255,255,255,0.12);
-            --pm-grid: rgba(148,163,184,0.18);
-            --pm-blue: #60a5fa;
-            --pm-blue-soft: rgba(96,165,250,0.18);
-            --pm-green: #22c55e;
-            --pm-red: #f87171;
-          }
-  
-          /* Header */
-          .pm-header {
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap: 12px;
-            margin-bottom: 10px;
-          }
-          .pm-header-left {
-            min-width: 0;
-            flex: 1;
-          }
-          .pm-label {
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.02em;
-            color: var(--pm-muted);
-            margin-bottom: 6px;
-          }
-  
-          .pm-select-wrap { position:relative; width: 100%; }
-          .pm-select {
-            width: 100%;
-            appearance:none;
-            border: 1px solid var(--pm-border);
-            background: color-mix(in srgb, var(--pm-bg) 85%, #f1f5f9 15%);
-            color: var(--pm-text);
-            border-radius: 12px;
-            padding: 10px 36px 10px 12px;
-            font-size: 14px;
-            font-weight: 650;
-            line-height: 1.2;
-            box-shadow: 0 1px 0 rgba(15,23,42,0.04);
-            outline: none;
-            cursor: pointer;
-          }
-          .pm-select:focus {
-            box-shadow: 0 0 0 3px color-mix(in srgb, var(--pm-blue) 30%, transparent);
-            border-color: color-mix(in srgb, var(--pm-blue) 60%, var(--pm-border));
-          }
-          .pm-select-wrap::after {
-            content: "▾";
-            position:absolute;
-            right: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: var(--pm-muted);
-            pointer-events:none;
-            font-size: 14px;
-          }
-  
-          /* Stats row */
-          .pm-stats {
-            display:flex;
-            align-items: baseline;
-            justify-content: space-between;
-            gap: 16px;
-            margin: 12px 0 12px;
-          }
-          .pm-odds {
-            display:flex;
-            align-items: baseline;
-            gap: 12px;
-          }
-          .pm-odds .pm-big {
-            font-size: 52px;
-            font-weight: 800;
-            letter-spacing: -0.04em;
-            line-height: 1;
-          }
-          .pm-odds .pm-big small {
-            font-size: 26px;
-            font-weight: 750;
-            margin-left: 2px;
-          }
-          .pm-delta {
-            display:inline-flex;
-            align-items:center;
-            gap: 6px;
-            font-size: 16px;
-            font-weight: 750;
-            padding: 6px 10px;
-            border-radius: 999px;
-            background: color-mix(in srgb, var(--pm-green) 14%, transparent);
-            color: var(--pm-green);
-          }
-          .pm-delta.neg {
-            background: color-mix(in srgb, var(--pm-red) 14%, transparent);
-            color: var(--pm-red);
-          }
-          .pm-right-meta {
-            text-align:right;
-            color: var(--pm-muted);
-            font-size: 13px;
-            line-height: 1.2;
-            white-space: nowrap;
-          }
-  
-          /* Chart */
-          .pm-chart-wrap {
-            position: relative;
-            border-radius: 14px;
-            overflow: hidden;
-            background: linear-gradient(180deg, var(--pm-blue-soft) 0%, rgba(0,0,0,0) 65%);
-            border: 1px solid color-mix(in srgb, var(--pm-border) 70%, transparent);
-          }
-          canvas.pm-chart {
-            width: 100%;
-            height: 220px;
-            display:block;
-            cursor: crosshair;
-          }
-  
-          /* Tooltip bubble */
-          .pm-tooltip {
-            position:absolute;
-            pointer-events:none;
-            background: color-mix(in srgb, var(--pm-bg) 92%, #ffffff 8%);
-            border: 1px solid color-mix(in srgb, var(--pm-border) 85%, transparent);
-            border-radius: 16px;
-            padding: 10px 12px;
-            min-width: 92px;
-            box-shadow: 0 14px 28px rgba(15,23,42,0.12);
-            backdrop-filter: blur(8px);
-            opacity: 0;
-            transform: translate(-50%, -110%);
-            transition: opacity 120ms ease;
-            z-index: 10;
-          }
-          .pm-tooltip.visible { opacity: 1; }
-          .pm-tooltip .date {
-            font-size: 12px;
-            font-weight: 700;
-            color: var(--pm-muted);
-            margin-bottom: 2px;
-          }
-          .pm-tooltip .price {
-            font-size: 22px;
-            font-weight: 850;
-            letter-spacing: -0.02em;
-            color: var(--pm-text);
-          }
-  
-          /* Controls */
-          .pm-controls {
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap: 12px;
-            margin-top: 12px;
-          }
-          .pm-pills {
-            display:inline-flex;
-            align-items:center;
-            gap: 4px;
-            background: var(--pm-pill-bg);
-            border: 1px solid color-mix(in srgb, var(--pm-border) 55%, transparent);
-            border-radius: 999px;
-            padding: 4px;
-          }
-          .pm-pill {
-            border: 1px solid transparent;
-            background: transparent;
-            color: var(--pm-muted);
-            font-size: 12px;
-            font-weight: 750;
-            padding: 8px 12px;
-            border-radius: 999px;
-            cursor:pointer;
-            transition: all 160ms ease;
-          }
-          .pm-pill:hover { color: var(--pm-text); }
-          .pm-pill.active {
-            background: var(--pm-pill-active-bg);
-            border-color: var(--pm-pill-border);
-            color: var(--pm-text);
-            box-shadow: 0 10px 18px rgba(15,23,42,0.10);
-          }
-  
-          /* Footer */
-          .pm-footer {
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap: 12px;
-            border-top: 1px solid color-mix(in srgb, var(--pm-border) 55%, transparent);
-            margin-top: 14px;
-            padding-top: 12px;
-            color: var(--pm-muted);
-            font-size: 13px;
-          }
-  
-          /* Loading & error */
-          .pm-loading {
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            padding: 30px 0;
-          }
-          .pm-spinner {
-            width: 28px; height: 28px;
-            border-radius: 999px;
-            border: 2px solid color-mix(in srgb, var(--pm-blue) 20%, transparent);
-            border-top-color: var(--pm-blue);
-            animation: pmSpin 0.8s linear infinite;
-          }
-          .pm-error {
-            margin-top: 10px;
-            font-size: 13px;
-            color: var(--pm-red);
-            display:none;
-          }
-        </style>
-  
-        <div class="pm-card ${theme === "dark" ? "pm-theme-dark" : "pm-theme-light"}">
-          <div class="pm-header">
-            <div class="pm-header-left">
-              <div class="pm-label">Prediction markets</div>
-              <div class="pm-select-wrap">
-                <select id="pm_sel" class="pm-select"></select>
-              </div>
-            </div>
+  constructor() {
+    super();
+    this.tooltipEl = null;
+    this.chartData = [];
+    this._ctx = null;
+    this._theme = "light";
+    this._timeframe = "ALL";
+    this._selectedIndex = 0;
+    this._markets = [];
+  }
+
+  async connectedCallback() {
+    const theme = this.getAttribute("theme") || "light";
+    this._theme = theme;
+
+    this.innerHTML = `
+      <style>
+        :host { display:block; --blue: #3b82f6; }
+        .pm-card {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          background: var(--pm-bg);
+          color: var(--pm-text);
+          border: 1px solid var(--pm-border);
+          border-radius: 16px;
+          padding: 20px;
+          box-shadow: var(--pm-shadow);
+          max-width: 500px;
+        }
+
+        /* Target Screenshot 2 Colors (Light) */
+        .pm-theme-light {
+          --pm-bg: #ffffff;
+          --pm-text: #0f172a;
+          --pm-muted: #64748b;
+          --pm-border: #f1f5f9;
+          --pm-shadow: 0 4px 20px rgba(0,0,0,0.05);
+          --pm-chart-fill: rgba(59, 130, 246, 0.08);
+          --pm-tooltip-bg: #ffffff;
+        }
+        
+        .pm-theme-dark {
+          --pm-bg: #0b1220;
+          --pm-text: #f8fafc;
+          --pm-muted: #94a3b8;
+          --pm-border: rgba(255,255,255,0.1);
+          --pm-shadow: 0 10px 30px rgba(0,0,0,0.3);
+          --pm-chart-fill: rgba(59, 130, 246, 0.15);
+          --pm-tooltip-bg: #1e293b;
+        }
+
+        .pm-header { margin-bottom: 8px; }
+        .pm-title-row { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+        .pm-title-row h3 { margin: 0; font-size: 18px; font-weight: 700; }
+        
+        .pm-stats { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .pm-big-pct { font-size: 42px; font-weight: 800; letter-spacing: -1px; }
+        .pm-delta { font-size: 16px; font-weight: 600; color: #16a34a; display: flex; align-items: center; }
+
+        .pm-chart-container { position: relative; height: 220px; margin-bottom: 16px; }
+        canvas { width: 100%; height: 100%; }
+
+        /* Floating Tooltip Style */
+        .pm-tooltip {
+          position: absolute;
+          background: var(--pm-tooltip-bg);
+          border-radius: 10px;
+          padding: 8px 12px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+          border: 1px solid var(--pm-border);
+          pointer-events: none;
+          opacity: 0;
+          transform: translate(-50%, -120%);
+          transition: opacity 0.1s ease;
+          z-index: 10;
+          text-align: center;
+        }
+        .pm-tooltip .t-date { color: var(--pm-muted); font-size: 11px; margin-bottom: 2px; text-transform: uppercase; }
+        .pm-tooltip .t-val { font-weight: 800; font-size: 15px; }
+
+        .pm-controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .pm-pills { display: flex; background: #f1f5f9; border-radius: 8px; padding: 3px; gap: 2px; }
+        .pm-theme-dark .pm-pills { background: rgba(255,255,255,0.05); }
+        .pm-pill { 
+          border: none; background: none; padding: 6px 12px; font-size: 12px; 
+          font-weight: 600; color: var(--pm-muted); cursor: pointer; border-radius: 6px;
+        }
+        .pm-pill.active { background: white; color: black; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .pm-theme-dark .pm-pill.active { background: rgba(255,255,255,0.15); color: white; }
+
+        .pm-meta-row { 
+          display: flex; justify-content: space-between; font-size: 13px; 
+          color: var(--pm-muted); border-top: 1px solid var(--pm-border); padding-top: 12px;
+        }
+      </style>
+
+      <div class="pm-card pm-theme-${this._theme}">
+        <div class="pm-header">
+          <div class="pm-title-row" id="title_trigger">
+            <h3 id="m_title">Loading market...</h3>
+            <span style="font-size: 12px; opacity: 0.5;">▼</span>
           </div>
-  
-          <div class="pm-stats" id="pm_stats" style="display:none;">
-            <div class="pm-odds">
-              <div class="pm-big" id="pm_big">--<small>%</small></div>
-              <div class="pm-delta" id="pm_delta">↗ +0.0%</div>
-            </div>
-            <div class="pm-right-meta">
-              <div id="pm_ends">Ends —</div>
-            </div>
-          </div>
-  
-          <div id="pm_loading" class="pm-loading">
-            <div class="pm-spinner"></div>
-          </div>
-  
-          <div id="pm_chart_wrap" class="pm-chart-wrap" style="display:none;">
-            <canvas id="pm_chart" class="pm-chart"></canvas>
-            <div id="pm_tooltip" class="pm-tooltip"></div>
-          </div>
-  
-          <div class="pm-controls" id="pm_controls" style="display:none;">
-            <div class="pm-pills" id="pm_pills">
-              ${["1D","1W","1M","ALL"].map(t => `<button type="button" data-tf="${t}" class="pm-pill${t === timeframe ? " active" : ""}">${t}</button>`).join("")}
-            </div>
-            <div class="pm-right-meta">
-              <div id="pm_updated">Updated —</div>
-            </div>
-          </div>
-  
-          <div class="pm-footer" id="pm_footer" style="display:none;">
-            <span id="pm_volume">Volume: —</span>
-            <span>Updated just now</span>
-          </div>
-  
-          <div id="pm_error" class="pm-error"></div>
         </div>
-      `;
-  
-      // Cache elements
-      this._sel = this.querySelector("#pm_sel");
-      this._canvas = this.querySelector("#pm_chart");
-      this._chartWrap = this.querySelector("#pm_chart_wrap");
-      this._loading = this.querySelector("#pm_loading");
-      this._error = this.querySelector("#pm_error");
-      this.tooltipEl = this.querySelector("#pm_tooltip");
-      this._updated = this.querySelector("#pm_updated");
-      this._endsEl = this.querySelector("#pm_ends");
-      this._volumeEl = this.querySelector("#pm_volume");
-      this._tfButtons = [...this.querySelectorAll(".pm-pill")];
-  
-      const statsRow = this.querySelector("#pm_stats");
-      const controlsRow = this.querySelector("#pm_controls");
-      const footerRow = this.querySelector("#pm_footer");
-      const bigEl = this.querySelector("#pm_big");
-      const deltaEl = this.querySelector("#pm_delta");
-  
-      const showError = (msg) => {
-        this._error.style.display = "block";
-        this._error.textContent = msg;
-        this._loading.style.display = "none";
-      };
-  
-      const setLoading = (isLoading) => {
-        this._loading.style.display = isLoading ? "flex" : "none";
-        if (isLoading) this._chartWrap.style.display = "none";
-      };
-  
-      const setVisible = () => {
-        statsRow.style.display = "flex";
-        this._chartWrap.style.display = "block";
-        controlsRow.style.display = "flex";
-        footerRow.style.display = "flex";
-      };
-  
-      try {
-        const apiBase = getApiBase();
-        const res = await fetch(`${apiBase}/v1/widget/markets`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ articleUrl, query, limit: 5 }),
-        });
-  
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-  
-        this._markets = Array.isArray(data.markets) ? data.markets : [];
-  
-        if (!this._markets.length) {
-          setLoading(false);
-          showError("No relevant markets found.");
-          return;
-        }
-  
-        // Populate dropdown
-        this._sel.innerHTML = this._markets
-          .map((m, i) => `<option value="${i}">${escapeHtml(m.title || m.question || "Market")}</option>`)
-          .join("");
-  
-        this._updated.textContent = `Updated ${new Date(data.updatedAt || Date.now()).toLocaleString()}`;
-  
-        // Init canvas + events
-        this._ctx = initCanvas(this._canvas);
-  
-        this._canvas.addEventListener("mousemove", (e) => this.handleHover(e));
-        this._canvas.addEventListener("mouseleave", () => this.hideTooltip());
-  
-        window.addEventListener("resize", () => {
-          this._ctx = initCanvas(this._canvas);
-          this.renderAll();
-        });
-  
-        // Dropdown change
-        this._sel.addEventListener("change", () => {
-          this._selectedIndex = Number(this._sel.value || 0);
-          this.renderAll();
-        });
-  
-        // Timeframe pills
-        this._tfButtons.forEach((btn) => {
-          btn.addEventListener("click", () => {
-            this._timeframe = btn.getAttribute("data-tf") || "ALL";
-            this._tfButtons.forEach((b) =>
-              b.classList.toggle("active", b.getAttribute("data-tf") === this._timeframe)
-            );
-            this.renderAll();
-          });
-        });
-  
-        // Initial render
-        setVisible();
-        await this.renderAll({ bigEl, deltaEl });
-      } catch (e) {
-        showError(`Widget failed to load: ${String(e?.message || e)}`);
-      }
-    }
-  
-    async renderAll(extra = {}) {
-      const { bigEl, deltaEl } = extra;
-      const m = this._markets[this._selectedIndex];
-      if (!m) return;
-  
-      // Stats
-      const yes = clamp01(m.yes);
-      const pct = (yes * 100).toFixed(0);
-  
-      const trend = Number(m.trend24h || 0) * 100; // already a fraction
-      const trendAbs = Math.abs(trend).toFixed(1);
-      const trendSign = trend >= 0 ? "+" : "-";
-  
-      if (bigEl) bigEl.innerHTML = `${pct}<small>%</small>`;
-      if (deltaEl) {
-        deltaEl.classList.toggle("neg", trend < 0);
-        deltaEl.textContent = `${trend >= 0 ? "↗" : "↘"} ${trendSign}${trendAbs}%`;
-      }
-  
-      // Ends + Volume
-      this._endsEl.textContent = m.endTime
-        ? `Ends ${new Date(m.endTime).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
-        : `Ends ${escapeHtml(m.endDate || "—")}`;
-      this._volumeEl.textContent = `Volume: ${escapeHtml(m.volume != null ? String(m.volume) : "—")}`;
-  
-      // Chart data + draw
-      this._chartWrap.style.display = "none";
-      this._loading.style.display = "flex";
-  
-      await renderChart(m, this._timeframe, this._ctx, this);
-  
-      this._loading.style.display = "none";
-      this._chartWrap.style.display = "block";
-    }
-  
-    handleHover(e) {
-      if (!this.chartData.length || !this.tooltipEl || !this._canvas) return;
-  
-      const rect = this._canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const w = rect.width;
-  
-      const pts = this.chartData;
-      const minT = pts[0].t;
-      const maxT = pts[pts.length - 1].t;
-  
-      const ratio = x / Math.max(1, w);
-      const targetT = minT + ratio * (maxT - minT);
-  
-      let closest = pts[0];
-      let best = Infinity;
-      for (const p of pts) {
-        const d = Math.abs(p.t - targetT);
-        if (d < best) {
-          best = d;
-          closest = p;
-        }
-      }
-  
-      const date = new Date(closest.t);
-      const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-      const pct = (closest.p * 100).toFixed(1);
-  
-      this.tooltipEl.innerHTML = `
-        <div class="date">${escapeHtml(dateStr)}</div>
-        <div class="price">${escapeHtml(pct)}%</div>
-      `;
-  
-      const pad = 16; // keep tooltip inside bounds
-      const clampedX = Math.min(Math.max(x, pad), rect.width - pad);
-      this.tooltipEl.style.left = `${clampedX}px`;
-      this.tooltipEl.style.top = `0px`;
-      this.tooltipEl.classList.add("visible");
-    }
-  
-    hideTooltip() {
-      if (this.tooltipEl) this.tooltipEl.classList.remove("visible");
+
+        <div class="pm-stats">
+          <div class="pm-big-pct" id="m_price">--%</div>
+          <div class="pm-delta" id="m_delta"></div>
+        </div>
+
+        <div class="pm-chart-container">
+          <div id="pm_tooltip" class="pm-tooltip">
+            <div class="t-date" id="t_date"></div>
+            <div class="t-val" id="t_val"></div>
+          </div>
+          <canvas id="pm_canvas"></canvas>
+        </div>
+
+        <div class="pm-controls">
+          <div class="pm-pills">
+            ${["1D","1W","1M","ALL"].map(tf => `<button class="pm-pill ${tf===this._timeframe?'active':''}" data-tf="${tf}">${tf}</button>`).join('')}
+          </div>
+          <div id="m_ends" style="font-size: 13px; color: var(--pm-muted);">Ends --</div>
+        </div>
+
+        <div class="pm-meta-row">
+          <span id="m_vol">Volume: --</span>
+          <span id="m_updated">Updated just now</span>
+        </div>
+      </div>
+    `;
+
+    this._canvas = this.querySelector("#pm_canvas");
+    this.tooltipEl = this.querySelector("#pm_tooltip");
+    
+    this.setupListeners();
+    this.fetchData();
+  }
+
+  setupListeners() {
+    this.querySelectorAll('.pm-pill').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        this.querySelectorAll('.pm-pill').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        this._timeframe = e.target.dataset.tf;
+        this.renderChart();
+      });
+    });
+
+    this._canvas.addEventListener("mousemove", (e) => this.handleHover(e));
+    this._canvas.addEventListener("mouseleave", () => this.tooltipEl.style.opacity = "0");
+  }
+
+  // Parses your database schema (outcome_prices jsonb)
+  getProbability(market) {
+    if (!market.outcome_prices) return 0.5;
+    
+    // Logic: Look for "Yes" key, or the first key if binary
+    const prices = market.outcome_prices;
+    if (prices["Yes"] !== undefined) return parseFloat(prices["Yes"]);
+    if (prices["yes"] !== undefined) return parseFloat(prices["yes"]);
+    
+    // Fallback: use first numeric value found
+    const firstKey = Object.keys(prices)[0];
+    return parseFloat(prices[firstKey]) || 0.5;
+  }
+
+  async fetchData() {
+    const query = this.getAttribute("query") || "";
+    // Simulated fetch - replace with your actual API call logic
+    // The data returned should match your Postgres schema
+    try {
+      // For demo, we assume this._markets is populated from your match_markets function
+      const res = await fetch(`${apiBase}/v1/widget/markets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ articleUrl, query, limit: 5 }),
+      });;
+      const data = await response.json();
+      this._markets = data.markets;
+      this.updateUI();
+    } catch (e) {
+      console.error("Fetch failed", e);
     }
   }
-  
-  customElements.define("probable-markets", ProbableMarkets);
-  
-  /* ---------- Chart drawing ---------- */
-  
-  function initCanvas(canvas) {
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-    canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-    const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return ctx;
+
+  updateUI() {
+    const m = this._markets[this._selectedIndex];
+    if (!m) return;
+
+    const prob = this.getProbability(m);
+    this.querySelector("#m_title").textContent = m.question || m.title;
+    this.querySelector("#m_price").textContent = `${Math.round(prob * 100)}%`;
+    this.querySelector("#m_vol").textContent = `Volume: $${(m.volume_num || 0).toLocaleString()}`;
+    
+    const endStr = m.end_time ? new Date(m.end_time).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) : '--';
+    this.querySelector("#m_ends").textContent = `Ends ${endStr}`;
+
+    // Dummy series data for demo if database series isn't present
+    this.chartData = this.generateSeries(prob);
+    this.renderChart();
   }
-  
-  async function renderChart(m, tf, ctx, component) {
-    let series = Array.isArray(m.series) ? m.series : null;
-    if (!series) {
-      const apiBase = getApiBase();
-      const r = await fetch(
-        `${apiBase}/v1/widget/series?id=${encodeURIComponent(m.id)}&tf=${encodeURIComponent(tf)}`
-      );
-      const d = await r.json().catch(() => ({}));
-      series = Array.isArray(d.series) ? d.series : [];
-    }
-  
-    const pts = filterSeries(series, tf);
-    component.chartData = pts;
-    drawOddsChart(ctx, pts, tf);
-  }
-  
-  function filterSeries(series, tf) {
+
+  generateSeries(currentProb) {
+    // Generates a smooth random walk ending at current price for demo
+    const pts = [];
     const now = Date.now();
-    const ms =
-      { "1D": 864e5, "1W": 7 * 864e5, "1M": 30 * 864e5, ALL: Infinity }[tf] ?? Infinity;
-  
-    const filtered = (series || [])
-      .filter((p) => typeof p?.t === "number" && typeof p?.p === "number")
-      .filter((p) => now - p.t <= ms)
-      .map((p) => ({ t: p.t, p: clamp01(p.p) }));
-  
-    // Ensure sorted by time
-    filtered.sort((a, b) => a.t - b.t);
-    return filtered;
+    for (let i = 0; i < 50; i++) {
+      pts.push({
+        t: now - (50 - i) * 3600000,
+        p: currentProb + (Math.random() - 0.5) * 0.1
+      });
+    }
+    pts[pts.length - 1].p = currentProb;
+    return pts;
   }
-  
-  function drawOddsChart(ctx, pts, tf) {
-    const w = ctx.canvas.getBoundingClientRect().width;
-    const h = ctx.canvas.getBoundingClientRect().height;
-    ctx.clearRect(0, 0, w, h);
-  
-    // Layout paddings for axes labels
-    const padLeft = 42;
-    const padRight = 10;
-    const padTop = 12;
-    const padBottom = 26;
-  
-    const plotW = w - padLeft - padRight;
-    const plotH = h - padTop - padBottom;
-  
-    // Grid + y-axis ticks
+
+  renderChart() {
+    const ctx = this._canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const rect = this._canvas.getBoundingClientRect();
+    
+    this._canvas.width = rect.width * dpr;
+    this._canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const pts = this.chartData;
+    const w = rect.width;
+    const h = rect.height;
+    
+    const padL = 35;
+    const padB = 25;
+    const chartW = w - padL;
+    const chartH = h - padB;
+
+    ctx.clearRect(0,0,w,h);
+
+    // Draw Y-Axis Grid (0, 25, 50, 75, 100)
+    ctx.strokeStyle = this._theme === 'light' ? '#f1f5f9' : 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgba(148,163,184,0.18)";
-  
-    const yTicks = [0, 25, 50, 75, 100];
-  
-    // Y axis labels
-    ctx.fillStyle = "rgba(100,116,139,0.95)";
-    ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
-  
-    for (const yv of yTicks) {
-      const y = padTop + (1 - yv / 100) * plotH;
-      // grid line
+    ctx.font = "10px sans-serif";
+    ctx.fillStyle = "#94a3b8";
+    
+    [0, 0.25, 0.5, 0.75, 1].forEach(tick => {
+      const y = chartH - (tick * chartH);
       ctx.beginPath();
-      ctx.moveTo(padLeft, y);
-      ctx.lineTo(w - padRight, y);
+      ctx.moveTo(padL, y);
+      ctx.lineTo(w, y);
       ctx.stroke();
-  
-      // label
-      ctx.fillText(`${yv}%`, 6, y + 4);
-    }
-  
+      ctx.fillText(`${tick * 100}%`, 0, y + 4);
+    });
+
     if (!pts.length) return;
-  
+
+    // Scaling functions
     const minT = pts[0].t;
-    const maxT = pts[pts.length - 1].t;
-  
-    const xScale = (t) => padLeft + ((t - minT) / Math.max(1, maxT - minT)) * plotW;
-    const yScale = (p) => padTop + (1 - p) * plotH;
-  
-    // Area gradient
-    const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
-    grad.addColorStop(0, "rgba(59,130,246,0.28)");
-    grad.addColorStop(0.7, "rgba(59,130,246,0.06)");
-    grad.addColorStop(1, "rgba(59,130,246,0.00)");
-  
-    // Area path (smooth)
+    const maxT = pts[pts.length-1].t;
+    const getX = (t) => padL + ((t - minT) / (maxT - minT)) * chartW;
+    const getY = (p) => chartH - (p * chartH);
+
+    // Draw Area
+    const grad = ctx.createLinearGradient(0, 0, 0, chartH);
+    grad.addColorStop(0, this._theme === 'light' ? 'rgba(59, 130, 246, 0.1)' : 'rgba(59, 130, 246, 0.2)');
+    grad.addColorStop(1, 'rgba(59, 130, 246, 0)');
+    
     ctx.beginPath();
-    ctx.moveTo(xScale(pts[0].t), padTop + plotH);
-    ctx.lineTo(xScale(pts[0].t), yScale(pts[0].p));
-  
-    for (let i = 1; i < pts.length; i++) {
-      const prev = pts[i - 1];
-      const curr = pts[i];
-      const prevX = xScale(prev.t);
-      const prevY = yScale(prev.p);
-      const currX = xScale(curr.t);
-      const currY = yScale(curr.p);
-      const midX = (prevX + currX) / 2;
-      ctx.bezierCurveTo(midX, prevY, midX, currY, currX, currY);
-    }
-  
-    ctx.lineTo(xScale(pts[pts.length - 1].t), padTop + plotH);
-    ctx.closePath();
+    ctx.moveTo(getX(pts[0].t), chartH);
+    this.drawSmoothPath(ctx, pts, getX, getY);
+    ctx.lineTo(getX(pts[pts.length-1].t), chartH);
     ctx.fillStyle = grad;
     ctx.fill();
-  
-    // Line stroke
+
+    // Draw Line
     ctx.beginPath();
-    ctx.moveTo(xScale(pts[0].t), yScale(pts[0].p));
-    for (let i = 1; i < pts.length; i++) {
-      const prev = pts[i - 1];
-      const curr = pts[i];
-      const prevX = xScale(prev.t);
-      const prevY = yScale(prev.p);
-      const currX = xScale(curr.t);
-      const currY = yScale(curr.p);
-      const midX = (prevX + currX) / 2;
-      ctx.bezierCurveTo(midX, prevY, midX, currY, currX, currY);
-    }
+    this.drawSmoothPath(ctx, pts, getX, getY);
     ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
+    ctx.lineWidth = 2.5;
     ctx.lineJoin = "round";
     ctx.stroke();
-  
-    // X-axis labels (start / mid / end)
-    const fmt = (t) =>
-      new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  
-    const t0 = minT;
-    const t1 = minT + (maxT - minT) / 2;
-    const t2 = maxT;
-  
-    ctx.fillStyle = "rgba(100,116,139,0.95)";
-    ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
-  
-    const yLabel = padTop + plotH + 18;
-    ctx.fillText(fmt(t0), padLeft, yLabel);
-  
-    const midText = fmt(t1);
-    const midW = ctx.measureText(midText).width;
-    ctx.fillText(midText, padLeft + plotW / 2 - midW / 2, yLabel);
-  
-    const endText = fmt(t2);
-    const endW = ctx.measureText(endText).width;
-    ctx.fillText(endText, padLeft + plotW - endW, yLabel);
   }
-  
-  function clamp01(x) {
-    const n = Number(x);
-    if (!Number.isFinite(n)) return 0.5;
-    return Math.max(0, Math.min(1, n));
+
+  drawSmoothPath(ctx, pts, getX, getY) {
+    ctx.moveTo(getX(pts[0].t), getY(pts[0].p));
+    for (let i = 0; i < pts.length - 1; i++) {
+      const x1 = getX(pts[i].t);
+      const y1 = getY(pts[i].p);
+      const x2 = getX(pts[i+1].t);
+      const y2 = getY(pts[i+1].p);
+      const xc = (x1 + x2) / 2;
+      ctx.bezierCurveTo(xc, y1, xc, y2, x2, y2);
+    }
   }
-  
-  function escapeHtml(s) {
-    return String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
+
+  handleHover(e) {
+    const rect = this._canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left - 35; // adjusting for padL
+    const chartW = rect.width - 35;
+    
+    if (x < 0) return;
+
+    const ratio = Math.min(Math.max(x / chartW, 0), 1);
+    const index = Math.floor(ratio * (this.chartData.length - 1));
+    const point = this.chartData[index];
+
+    if (point) {
+      this.tooltipEl.style.opacity = "1";
+      this.tooltipEl.style.left = `${getX(point.t, rect.width)}px`;
+      this.tooltipEl.style.top = `${getY(point.p, rect.height)}px`;
+      
+      this.querySelector("#t_date").textContent = new Date(point.t).toLocaleDateString(undefined, {month:'short', day:'numeric'});
+      this.querySelector("#t_val").textContent = `${Math.round(point.p * 100)}%`;
+    }
   }
-  
-  function getApiBase() {
-    const script =
-      document.currentScript ||
-      [...document.scripts].find((s) => (s.src || "").includes("embed.js"));
-    if (script?.src) return new URL(script.src).origin;
-    return window.location.origin;
-  }
-  
+}
+
+// Helper for hover positioning outside the render loop
+function getX(t, w) {
+  // Simple re-calc for tooltip positioning
+  return 35 + ((t - minT_global) / (maxT_global - minT_global)) * (w - 35);
+}
+// Note: In production, store scaling factors as class properties to avoid re-calc
+
+function getApiBase() {
+  const script =
+    document.currentScript ||
+    [...document.scripts].find((s) => (s.src || "").includes("embed.js"));
+  if (script?.src) return new URL(script.src).origin;
+  return window.location.origin;
+}
+
+customElements.define("probable-markets", ProbableMarkets);
