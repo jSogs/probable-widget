@@ -1,4 +1,4 @@
-// embed.js — drop-in working version (custom element + styled card + canvas chart w/ axes + tooltip)
+// embed.js — drop-in working version with dropdown market selector
 // Usage:
 // <script async src="https://YOUR_DOMAIN/embed.js"></script>
 // <probable-markets query="bitcoin" theme="light" timeframe="1W" limit="5"></probable-markets>
@@ -10,13 +10,15 @@ class ProbableMarkets extends HTMLElement {
     this._timeframe = "ALL";
     this._selectedIndex = 0;
     this._markets = [];
-
     this.chartData = [];
-    this.tooltipEl = null;
+    this._scale = null;
+
+    // DOM refs
     this._canvas = null;
     this._ctx = null;
+    this.tooltipEl = null;
 
-    // cached DOM
+    this._selectEl = null;
     this._titleEl = null;
     this._priceEl = null;
     this._deltaEl = null;
@@ -25,8 +27,8 @@ class ProbableMarkets extends HTMLElement {
     this._updatedEl = null;
     this._pillBtns = [];
 
-    // hover scaling (stored so tooltip math is correct)
-    this._scale = null;
+    this._loadingEl = null;
+    this._errorEl = null;
   }
 
   async connectedCallback() {
@@ -55,10 +57,9 @@ class ProbableMarkets extends HTMLElement {
           border-radius: 16px;
           padding: 18px;
           box-shadow: var(--pm-shadow);
-          max-width: 520px;
+          max-width: 560px;
         }
 
-        /* Light / Dark tokens */
         .pm-theme-light {
           --pm-bg: #ffffff;
           --pm-text: #0f172a;
@@ -76,6 +77,8 @@ class ProbableMarkets extends HTMLElement {
           --pm-pill-active: #ffffff;
           --pm-green: #16a34a;
           --pm-red: #ef4444;
+          --pm-select-bg: #ffffff;
+          --pm-select-border: rgba(15,23,42,0.12);
         }
 
         .pm-theme-dark {
@@ -95,23 +98,27 @@ class ProbableMarkets extends HTMLElement {
           --pm-pill-active: rgba(255,255,255,0.12);
           --pm-green: #22c55e;
           --pm-red: #f87171;
+          --pm-select-bg: rgba(255,255,255,0.06);
+          --pm-select-border: rgba(255,255,255,0.14);
         }
 
-        .pm-header { margin-bottom: 10px; }
-        .pm-title {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 800;
-          letter-spacing: -0.02em;
-          line-height: 1.2;
-        }
-        .pm-sub {
-          margin-top: 6px;
-          color: var(--pm-muted);
-          font-size: 12px;
+        .pm-header { margin-bottom: 10px; display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+        .pm-sub { color: var(--pm-muted); font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.03em; }
+        .pm-title { margin: 6px 0 0; font-size: 18px; font-weight: 850; letter-spacing: -0.02em; line-height: 1.2; }
+
+        /* Dropdown */
+        .pm-select-wrap { min-width: 210px; }
+        .pm-select {
+          width: 100%;
+          border-radius: 12px;
+          padding: 10px 12px;
+          border: 1px solid var(--pm-select-border);
+          background: var(--pm-select-bg);
+          color: var(--pm-text);
+          font-size: 13px;
           font-weight: 700;
-          letter-spacing: 0.02em;
-          text-transform: uppercase;
+          outline: none;
+          cursor: pointer;
         }
 
         .pm-stats {
@@ -121,19 +128,15 @@ class ProbableMarkets extends HTMLElement {
           gap: 12px;
           margin: 12px 0 12px;
         }
-        .pm-left-stats { display:flex; align-items: baseline; gap: 12px; }
-        .pm-big {
-          font-size: 48px;
-          font-weight: 850;
-          letter-spacing: -0.04em;
-          line-height: 1;
-        }
+        .pm-left { display:flex; align-items: baseline; gap: 12px; }
+        .pm-big { font-size: 48px; font-weight: 900; letter-spacing: -0.05em; line-height: 1; }
+
         .pm-delta {
           display:inline-flex;
           align-items:center;
           gap: 6px;
           font-size: 14px;
-          font-weight: 800;
+          font-weight: 850;
           padding: 6px 10px;
           border-radius: 999px;
           background: color-mix(in srgb, var(--pm-green) 14%, transparent);
@@ -145,13 +148,7 @@ class ProbableMarkets extends HTMLElement {
           color: var(--pm-red);
         }
 
-        .pm-right-meta {
-          text-align: right;
-          color: var(--pm-muted);
-          font-size: 13px;
-          line-height: 1.2;
-          white-space: nowrap;
-        }
+        .pm-right-meta { text-align:right; color: var(--pm-muted); font-size: 13px; line-height: 1.2; white-space: nowrap; }
 
         .pm-chart-container {
           position: relative;
@@ -183,17 +180,9 @@ class ProbableMarkets extends HTMLElement {
         .pm-tooltip .t-date { color: var(--pm-muted); font-size: 12px; font-weight: 750; margin-bottom: 2px; }
         .pm-tooltip .t-val { color: var(--pm-text); font-size: 20px; font-weight: 900; letter-spacing: -0.02em; }
 
-        .pm-controls {
-          display:flex;
-          justify-content: space-between;
-          align-items:center;
-          gap: 12px;
-          margin-top: 12px;
-        }
+        .pm-controls { display:flex; justify-content: space-between; align-items:center; gap: 12px; margin-top: 12px; }
         .pm-pills {
-          display:inline-flex;
-          align-items:center;
-          gap: 4px;
+          display:inline-flex; align-items:center; gap: 4px;
           background: var(--pm-pill-bg);
           border: 1px solid color-mix(in srgb, var(--pm-border) 55%, transparent);
           border-radius: 999px;
@@ -204,7 +193,7 @@ class ProbableMarkets extends HTMLElement {
           background: transparent;
           color: var(--pm-muted);
           font-size: 12px;
-          font-weight: 800;
+          font-weight: 850;
           padding: 8px 12px;
           border-radius: 999px;
           cursor: pointer;
@@ -218,10 +207,7 @@ class ProbableMarkets extends HTMLElement {
         }
 
         .pm-footer {
-          display:flex;
-          justify-content: space-between;
-          align-items:center;
-          gap: 12px;
+          display:flex; justify-content: space-between; align-items:center; gap: 12px;
           color: var(--pm-muted);
           font-size: 13px;
           border-top: 1px solid color-mix(in srgb, var(--pm-border) 55%, transparent);
@@ -240,23 +226,25 @@ class ProbableMarkets extends HTMLElement {
           font-weight: 650;
           display:none;
         }
-
-        .pm-loading {
-          margin-top: 8px;
-          color: var(--pm-muted);
-          font-size: 13px;
-          font-weight: 650;
-        }
+        .pm-loading { margin-top: 8px; color: var(--pm-muted); font-size: 13px; font-weight: 650; }
       </style>
 
       <div class="pm-card pm-theme-${escapeHtml(this._theme)}">
         <div class="pm-header">
-          <div class="pm-sub">Prediction market</div>
-          <h3 class="pm-title" id="pm_title">Loading…</h3>
+          <div>
+            <div class="pm-sub">Prediction market</div>
+            <h3 class="pm-title" id="pm_title">Loading…</h3>
+          </div>
+
+          <div class="pm-select-wrap">
+            <select class="pm-select" id="pm_select">
+              <option>Loading…</option>
+            </select>
+          </div>
         </div>
 
         <div class="pm-stats">
-          <div class="pm-left-stats">
+          <div class="pm-left">
             <div class="pm-big" id="pm_price">--%</div>
             <div class="pm-delta" id="pm_delta">↗ +0.0%</div>
           </div>
@@ -298,6 +286,7 @@ class ProbableMarkets extends HTMLElement {
     this._ctx = this._canvas.getContext("2d");
     this.tooltipEl = this.querySelector("#pm_tooltip");
 
+    this._selectEl = this.querySelector("#pm_select");
     this._titleEl = this.querySelector("#pm_title");
     this._priceEl = this.querySelector("#pm_price");
     this._deltaEl = this.querySelector("#pm_delta");
@@ -312,15 +301,26 @@ class ProbableMarkets extends HTMLElement {
   }
 
   bindEvents() {
+    // timeframe pills
     this._pillBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
         this._pillBtns.forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         this._timeframe = btn.getAttribute("data-tf") || "ALL";
-        this.updateChart(); // just redraw
+        this.updateChartOnly();
       });
     });
 
+    // dropdown market selection
+    this._selectEl.addEventListener("change", () => {
+      const idx = Number(this._selectEl.value);
+      if (Number.isFinite(idx)) {
+        this._selectedIndex = idx;
+        this.updateUI();
+      }
+    });
+
+    // hover
     this._canvas.addEventListener("mousemove", (e) => this.handleHover(e));
     this._canvas.addEventListener("mouseleave", () => this.hideTooltip());
 
@@ -350,69 +350,82 @@ class ProbableMarkets extends HTMLElement {
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
 
       this._markets = Array.isArray(data.markets) ? data.markets : [];
+      if (!this._markets.length) throw new Error("No relevant markets found.");
 
-      if (!this._markets.length) {
-        throw new Error("No relevant markets found.");
-      }
+      const when = data.updatedAt ? new Date(data.updatedAt) : new Date();
+      this._updatedEl.textContent = `Updated ${when.toLocaleString()}`;
 
-      if (this._updatedEl) {
-        const when = data.updatedAt ? new Date(data.updatedAt) : new Date();
-        this._updatedEl.textContent = `Updated ${when.toLocaleString()}`;
-      }
+      this.populateDropdown();
 
-      // Select first market
       this._selectedIndex = 0;
       this.setLoading(false);
     } catch (e) {
       this.setLoading(false);
-      this.setError(`Widget failed: ${String(e?.message || e)}`);
       this._markets = [];
+      this.populateDropdown();
+      this.setError(`Widget failed: ${String(e?.message || e)}`);
     }
   }
 
-  updateUI() {
-    if (!this._markets.length) return;
+  populateDropdown() {
+    // Clear
+    this._selectEl.innerHTML = "";
 
+    if (!this._markets.length) {
+      const opt = document.createElement("option");
+      opt.textContent = "No markets";
+      opt.value = "0";
+      this._selectEl.appendChild(opt);
+      return;
+    }
+
+    this._markets.forEach((m, i) => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = truncate(m.title || m.question || `Market ${i + 1}`, 52);
+      this._selectEl.appendChild(opt);
+    });
+
+    this._selectEl.value = String(this._selectedIndex);
+  }
+
+  updateUI() {
     const m = this._markets[this._selectedIndex];
+    if (!m) return;
+
+    this._selectEl.value = String(this._selectedIndex);
 
     // Title
     this._titleEl.textContent = m.question || m.title || "Market";
 
-    // Probability
-    const yes = getProbabilityFraction(m);
-    const pct = Math.round(yes * 100);
-    this._priceEl.textContent = `${pct}%`;
+    // Probability (from DB/API)
+    const yes = getProbabilityFraction(m) ?? 0;
+    this._priceEl.textContent = `${Math.round(yes * 100)}%`;
 
-    // 24h change
+    // 24h delta
     const change = getChange24hFraction(m); // fraction
     const changePct = change * 100;
     this._deltaEl.classList.toggle("neg", changePct < 0);
     this._deltaEl.textContent = `${changePct >= 0 ? "↗" : "↘"} ${changePct >= 0 ? "+" : "-"}${Math.abs(changePct).toFixed(1)}%`;
 
-    // Ends
+    // Ends + Volume (support both normalized API + raw DB names)
     const endTime = m.endTime ?? m.end_time ?? null;
     const endStr = endTime
       ? new Date(endTime).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
       : "—";
     this._endsEl.textContent = `Ends ${endStr}`;
 
-    // Volume
     const vol = m.volume ?? m.volume_num ?? null;
     this._volEl.textContent = `Volume: ${vol == null ? "—" : `$${Number(vol).toLocaleString()}`}`;
 
-    // Series
+    // Series (prefer API series; otherwise generate synthetic for demo)
     this.chartData = normalizeSeries(m.series);
-    if (!this.chartData.length) {
-      // generate a synthetic series so the chart still looks good for demos
-      this.chartData = generateSeries(yes);
-    }
+    if (!this.chartData.length) this.chartData = generateSeries(yes);
 
-    this.resizeCanvas();
-    this.drawChart(this.getFilteredSeries());
+    this.updateChartOnly();
   }
 
-  updateChart() {
-    if (!this.chartData.length) return;
+  updateChartOnly() {
     this.resizeCanvas();
     this.drawChart(this.getFilteredSeries());
   }
@@ -439,14 +452,12 @@ class ProbableMarkets extends HTMLElement {
       this._canvas.width = w;
       this._canvas.height = h;
     }
-    // Reset transform so we don't accumulate scaling
     this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   drawChart(pts) {
     const ctx = this._ctx;
     const dpr = window.devicePixelRatio || 1;
-
     const W = this._canvas.width / dpr;
     const H = this._canvas.height / dpr;
 
@@ -456,11 +467,10 @@ class ProbableMarkets extends HTMLElement {
     const padRight = 12;
     const padTop = 14;
     const padBottom = 30;
-
     const plotW = W - padLeft - padRight;
     const plotH = H - padTop - padBottom;
 
-    // Grid + y labels
+    // grid + y labels
     ctx.lineWidth = 1;
     ctx.strokeStyle = getCssVar(this, "--pm-grid") || "rgba(148,163,184,0.18)";
     ctx.fillStyle = getCssVar(this, "--pm-muted") || "rgba(100,116,139,0.95)";
@@ -484,16 +494,15 @@ class ProbableMarkets extends HTMLElement {
     const xScale = (t) => padLeft + ((t - minT) / Math.max(1, maxT - minT)) * plotW;
     const yScale = (p) => padTop + (1 - p) * plotH;
 
-    // store for hover math
-    this._scale = { padLeft, padTop, padBottom, plotW, plotH, minT, maxT };
+    this._scale = { padLeft, padTop, plotW, plotH, minT, maxT };
 
-    // Area gradient
+    // area gradient
     const grad = ctx.createLinearGradient(0, padTop, 0, padTop + plotH);
     grad.addColorStop(0, getCssVar(this, "--pm-area-top") || "rgba(59,130,246,0.22)");
     grad.addColorStop(0.7, getCssVar(this, "--pm-area-mid") || "rgba(59,130,246,0.06)");
     grad.addColorStop(1, getCssVar(this, "--pm-area-bot") || "rgba(59,130,246,0.00)");
 
-    // Area path
+    // area path
     ctx.beginPath();
     ctx.moveTo(xScale(pts[0].t), padTop + plotH);
     ctx.lineTo(xScale(pts[0].t), yScale(pts[0].p));
@@ -514,7 +523,7 @@ class ProbableMarkets extends HTMLElement {
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // Line
+    // line
     ctx.beginPath();
     ctx.moveTo(xScale(pts[0].t), yScale(pts[0].p));
     for (let i = 1; i < pts.length; i++) {
@@ -533,9 +542,8 @@ class ProbableMarkets extends HTMLElement {
     ctx.lineJoin = "round";
     ctx.stroke();
 
-    // X-axis labels (start / mid / end)
+    // x labels (start/mid/end)
     const fmt = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-
     const t0 = minT;
     const t1 = minT + (maxT - minT) / 2;
     const t2 = maxT;
@@ -563,7 +571,6 @@ class ProbableMarkets extends HTMLElement {
     const mouseX = e.clientX - rect.left;
 
     const { padLeft, plotW, plotH, padTop, minT, maxT } = this._scale;
-
     const ratio = Math.min(Math.max((mouseX - padLeft) / Math.max(1, plotW), 0), 1);
     const targetT = minT + ratio * (maxT - minT);
 
@@ -580,13 +587,10 @@ class ProbableMarkets extends HTMLElement {
     const x = padLeft + ((closest.t - minT) / Math.max(1, maxT - minT)) * plotW;
     const y = padTop + (1 - closest.p) * plotH;
 
-    const dateStr = new Date(closest.t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    const valStr = `${(closest.p * 100).toFixed(1)}%`;
+    this.querySelector("#t_date").textContent =
+      new Date(closest.t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    this.querySelector("#t_val").textContent = `${(closest.p * 100).toFixed(1)}%`;
 
-    this.querySelector("#t_date").textContent = dateStr;
-    this.querySelector("#t_val").textContent = valStr;
-
-    // Keep tooltip in bounds a bit
     const pad = 18;
     const clampedX = Math.min(Math.max(x, pad), rect.width - pad);
 
@@ -638,13 +642,23 @@ function escapeHtml(s) {
     .replaceAll("'", "&#039;");
 }
 
+function truncate(s, n) {
+  const str = String(s ?? "");
+  return str.length > n ? str.slice(0, n - 1) + "…" : str;
+}
+
+function clamp01(x) {
+  const n = Number(x);
+  if (!Number.isFinite(n)) return 0.5;
+  return Math.max(0, Math.min(1, n));
+}
+
 function normalizeSeries(series) {
   if (!Array.isArray(series)) return [];
-  const out = series
+  return series
     .filter((p) => typeof p?.t === "number" && typeof p?.p === "number")
     .map((p) => ({ t: p.t, p: clamp01(p.p) }))
     .sort((a, b) => a.t - b.t);
-  return out;
 }
 
 function generateSeries(currentYes) {
@@ -664,20 +678,55 @@ function generateSeries(currentYes) {
   return pts;
 }
 
-function clamp01(x) {
-  const n = Number(x);
-  if (!Number.isFinite(n)) return 0.5;
-  return Math.max(0, Math.min(1, n));
-}
-
+/**
+ * IMPORTANT: This is where your "50%" bug comes from.
+ * If none of these fields exist in the API payload, it falls back to 0.5.
+ */
 function getProbabilityFraction(m) {
+  // 1) normalized API field (best)
+  return m.yes;
   if (Number.isFinite(m?.yes)) return clamp01(m.yes);
 
+  // 2) if API sends percent (0..100)
+  if (Number.isFinite(m?.probability)) return clamp01(m.probability / 100);
+
+  // 3) raw db fields (snake/camel)
+  const op = m?.outcome_prices ?? m?.outcomePrices ?? m?.outcome_prices_json ?? null;
+
+  // if outcome_prices arrives as JSON string
+  if (typeof op === "string") {
+    try {
+      const parsed = JSON.parse(op);
+      return getProbabilityFraction({ ...m, outcome_prices: parsed });
+    } catch {
+      return 0.5;
+    }
+  }
+
+  // if object like {"Yes":0.62}
+  if (op && typeof op === "object" && !Array.isArray(op)) {
+    const v = op.Yes ?? op.yes ?? op.YES;
+    if (Number.isFinite(v)) return clamp01(Number(v));
+
+    // if it’s something like {"0":0.62,"1":0.38} or weird keys
+    const first = Object.values(op).find((x) => Number.isFinite(x));
+    if (first != null) return clamp01(Number(first));
+  }
+
+  // if array like [0.62,0.38]
+  if (Array.isArray(op) && op.length) {
+    const first = op.find((x) => Number.isFinite(x));
+    if (first != null) return clamp01(Number(first));
+  }
+
+  // fallback
   return 0.5;
 }
 
 function getChange24hFraction(m) {
+  // normalized API field
   if (Number.isFinite(m?.trend24h)) return Number(m.trend24h);
+  // some APIs use percent points
   if (Number.isFinite(m?.change24h)) return Number(m.change24h) / 100;
   if (Number.isFinite(m?.delta24h)) return Number(m.delta24h);
   return 0;
